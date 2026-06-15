@@ -1,0 +1,65 @@
+# ════════════════════════════════════════════════════════════════════════
+#  .gitignore for the Yolo_Monitor (camera) repo
+#  MUST be in place BEFORE the first `git add`.
+# ════════════════════════════════════════════════════════════════════════
+
+# ── Heavy ML models (hundreds of MB) — keep OUT of git ───────────────────
+# Distribute out-of-band (shared drive / release asset) or via Git LFS.
+*.pt
+*.onnx
+*.task
+*.tflite
+*.pb
+
+# ── Biometric data — PDPA: MUST NEVER reach a remote/cloud repo ──────────
+faces/
+customer_faces/
+customers/
+*.npz
+staff.json
+customers.json
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+local_settings.py
+.env
+.env.*
+.secret
+.secret.*
+*.key
+
+# ── Runtime output / evidence images / logs ──────────────────────────────
+bookings_cache.json
+events.jsonl
+events_*.jsonl
+timelines/
+timelines_*/
+Penalty/
+behavior_events/
+evidence/
+*.log
+firebase-debug.log
+
+# ── ALL images — every frame in this tree is CCTV footage with faces ─────
+# (PDPA). The repo needs no images; reference snapshots are regenerated
+# locally. Camera-side review hardening 2026-06-15.
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.bmp
+Screenshots/
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+*.egg-info/
+
+# ── OS / editor ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
