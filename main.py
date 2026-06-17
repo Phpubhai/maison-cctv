@@ -28,6 +28,7 @@ from face_enroller import AutoEnroller
 from floor_watch import FloorWatch
 from overlay import compose, draw_people, draw_phones
 from person_labeler import FaceMatcher
+from pos_timeline import PushWorker, start_image_server
 from room_tidy import TidyMonitor
 from sleep_analyzer import EyeScorer, PoseEstimator
 from timeline_logger import TimelineLogger
@@ -123,6 +124,10 @@ def main(sources):
             for i, s in enumerate(sources)]
     cam_ids = [name for name, _ in cams]
     logger = TimelineLogger(CONFIG)
+    # timeline history server + POS push (no-ops if disabled / no store)
+    if logger.store is not None:
+        image_base = start_image_server(CONFIG)
+        PushWorker(logger.store, CONFIG, image_base).start()
     pose = PoseEstimator(CONFIG)   # stateless -> shared
     eyes = EyeScorer(CONFIG)       # stateless -> shared
     faces = FaceMatcher(CONFIG)    # enrolled staff faces -> shared

@@ -31,6 +31,11 @@ local_settings.py
 bookings_cache.json
 events.jsonl
 events_*.jsonl
+# local SQLite history (contains names + event history — stays in the shop)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 timelines/
 timelines_*/
 Penalty/

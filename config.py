@@ -43,6 +43,15 @@ CONFIG = {
     # events, no evidence images. For public space (passers-by must not be
     # analyzed or photographed).
     "watch_only": ["street"],
+    # ignore zones: people whose box CENTER falls inside are dropped before
+    # tracking/analysis -- for someone working at the very edge of a frame who
+    # keeps flickering in/out (spamming ENTER/LEAVE). Checking the CENTER means
+    # a person merely walking through the area isn't dropped (their center sits
+    # higher); only edge-clipped sitters land here. (x1,y1,x2,y2) frame fractions.
+    "ignore_zones": {
+        "office": [(0.0, 0.72, 0.68, 1.0)],   # desks along the bottom edge
+    },
+
     # presence cameras: a staff-only room. Everyone in frame is logged as
     # STAFF on enter/leave (no uniform/face check needed -- only staff can be
     # here) but NO penalty analysis runs. For back rooms where normal staff
@@ -230,6 +239,20 @@ CONFIG = {
     "evidence_dir": os.path.join(_HERE, "behavior_events"),
     "penalty_dir": os.path.join(_HERE, "Penalty"),  # staff misbehavior images
                                   # (SLEEPING / PHONE USE) go here instead
+
+    # --- timeline history (SQLite) -------------------------------------------
+    # full local source of truth; queryable time/who/what table. A subset
+    # (penalty + customer) is pushed to the POS. Evidence images stay local.
+    "timeline_db": os.path.join(_HERE, "events.db"),
+    "timeline_retention_days": 365,   # purge rows + orphan images older than this
+
+    # local LAN-only image server so the POS "view image" link resolves
+    # in-shop (images NEVER go to cloud). 0.0.0.0 = reachable on the LAN.
+    "image_server": {"host": "0.0.0.0", "port": 8088, "enabled": True},
+
+    # push the penalty+customer subset to the POS Cloud Function (Firestore).
+    # base_url/api_key come from local_settings.py (POS_API_KEY) when ready.
+    "pos_timeline": {"enabled": False, "poll_secs": 5, "batch": 25},
 
     # --- GPU survival (this PC's driver crashes under sustained load) -------
     "gpu_temp_pause": 80,         # pause all analysis at this temperature

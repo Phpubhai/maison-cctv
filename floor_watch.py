@@ -117,12 +117,12 @@ class FloorWatch:
                 self.last_alert = now
                 self.alerted = True
                 what = ", ".join(sorted(set(found)))
+                img = self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
+                                                "OBJECT ON FLOOR", duration=held,
+                                                started=self.pending_since)
                 self.logger.log(self.camera_id, "STAFF", "OBJECT ON FLOOR",
                                 f"{what} on the floor since "
-                                f"{_clock(self.pending_since)}", "alert")
-                self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
-                                          "OBJECT ON FLOOR", duration=held,
-                                          started=self.pending_since)
+                                f"{_clock(self.pending_since)}", "alert", image_path=img)
         else:
             if self.alerted:
                 self.logger.log(self.camera_id, "STAFF", "FLOOR CLEAR",

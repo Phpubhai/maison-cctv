@@ -15,10 +15,27 @@ from collections import defaultdict, deque
 
 import cv2
 
+from event_store import EventStore
+
 try:
     from websockets.asyncio.server import serve
 except ImportError:  # package missing -> file logging still works
     serve = None
+
+
+# map the on-screen label to a structured (actor_type, actor_name) for the DB.
+# "STAFF:Phai" -> ("staff","Phai"); "STAFF" -> ("staff",None);
+# "customer" -> ("customer",None); "?" -> ("unknown",None)
+def _split_actor(label):
+    if not label or label == "?":
+        return "unknown", None
+    if label.startswith("STAFF:"):
+        return "staff", label.split(":", 1)[1]
+    if label == "STAFF":
+        return "staff", None
+    if label == "customer":
+        return "customer", None
+    return "staff", label  # a bare name (face-identified) -> staff by name
 
 
 class TimelineLogger:
@@ -38,6 +55,21 @@ class TimelineLogger:
         self.lock = threading.Lock()
         self.clients = set()
         self.loop = None
+        # SQLite history (full local source of truth). Best-effort: if it
+        # fails to open, the jsonl/.txt sinks still work.
+        self.store = None
+        try:
+            self.store = EventStore(cfg["timeline_db"])
+            days = cfg.get("timeline_retention_days")
+            if days:
+                for p in self.store.purge_old(days):
+                    try:
+                        if p and os.path.exists(p):
+                            os.remove(p)
+                    except OSError:
+                        pass
+        except Exception as e:
+            print(f"event store disabled ({e}) -> jsonl only", flush=True)
         if serve is None:
             print("websockets not installed -> events.jsonl only, no broadcast", flush=True)
         else:
@@ -46,9 +78,10 @@ class TimelineLogger:
 
     # --- public API -------------------------------------------------------
     def log(self, camera_id, label, event, description, severity,
-            therapist_id=None):
+            therapist_id=None, image_path=None):
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
         entry = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": ts,
             "camera_id": camera_id,
             "label": label,
             "event": event,
@@ -57,6 +90,14 @@ class TimelineLogger:
             "therapist_id": therapist_id,  # POS join key, null when unknown
         }
         line = json.dumps(entry, ensure_ascii=False)
+        # SQLite history (the queryable time/who/what table)
+        if self.store is not None:
+            try:
+                actor_type, actor_name = _split_actor(label)
+                self.store.add(ts, camera_id, actor_type, actor_name,
+                               therapist_id, event, description, severity, image_path)
+            except Exception as e:
+                print(f"event store write failed: {e}", flush=True)
         # each camera also keeps its own human-readable timeline .txt
         # (openable in Notepad); the combined events.jsonl is for software
         txt = (f"[{entry['timestamp']}] {entry['event']:<12} "
@@ -97,7 +138,9 @@ class TimelineLogger:
             cv2.putText(ev, f"for {int(duration)}s{since}", (int(box[0]), ty + 28),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
         out_dir = self.penalty_dir if event in self.PENALTY_EVENTS else self.evid_dir
-        cv2.imwrite(os.path.join(out_dir, fname + ".jpg"), ev)
+        path = os.path.join(out_dir, fname + ".jpg")
+        cv2.imwrite(path, ev)
+        return path   # caller passes this to log(image_path=...) to link the row
 
     def tail(self, camera_id):
         """Most recent events for one camera (oldest first), for the overlay."""

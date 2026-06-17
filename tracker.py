@@ -64,6 +64,7 @@ class TrackManager:
         self.enroller = enroller
         self.watch_only = camera_id in cfg.get("watch_only", [])
         self.presence = camera_id in cfg.get("presence_cameras", [])
+        self.ignore_zones = cfg.get("ignore_zones", {}).get(camera_id, [])
         self.people = {}  # internal track id -> _Tracked
         # greeting rule state (active on greeting_cameras only)
         self.greet_enabled = camera_id in cfg.get("greeting_cameras", [])
@@ -117,13 +118,13 @@ class TrackManager:
             else:
                 emit = self._cooldown_ok(p, "SLEEPING", now)
             if emit:
+                img = self.logger.save_evidence(frame, box, self.camera_id, label,
+                                                "SLEEPING", duration=p.held,
+                                                started=p.sleep_started)
                 self.logger.log(self.camera_id, label, "SLEEPING",
                                 f"{why}, started {_clock(p.sleep_started)} "
                                 f"({int(p.held)}s so far)", "alert",
-                                therapist_id=tid)
-                self.logger.save_evidence(frame, box, self.camera_id, label,
-                                          "SLEEPING", duration=p.held,
-                                          started=p.sleep_started)
+                                therapist_id=tid, image_path=img)
         elif prev == "sleeping":
             # episode over: log how long it lasted in total
             dur = now - (p.sleep_started or now)
@@ -152,13 +153,13 @@ class TrackManager:
             self._end_phone(p, label)
         if (p.phone_since and now - p.phone_since >= self.cfg["phone_secs"]
                 and self._cooldown_ok(p, "PHONE USE", now)):
+            img = self.logger.save_evidence(frame, box, self.camera_id, label,
+                                            "PHONE USE", duration=now - p.phone_since,
+                                            started=p.phone_since)
             self.logger.log(self.camera_id, label, "PHONE USE",
                             f"phone in hand, started {_clock(p.phone_since)} "
                             f"({int(now - p.phone_since)}s so far)", "alert",
-                            therapist_id=tid)
-            self.logger.save_evidence(frame, box, self.camera_id, label,
-                                      "PHONE USE", duration=now - p.phone_since,
-                                      started=p.phone_since)
+                            therapist_id=tid, image_path=img)
             p.phone_announced = True
 
     def _end_phone(self, p, label):
@@ -179,10 +180,10 @@ class TrackManager:
         if flagged:
             p.imb_short, full = describe_causes(flagged)
             if self._cooldown_ok(p, "POSTURE NOTE", now):
+                img = self.logger.save_evidence(frame, box, self.camera_id,
+                                                "customer", "POSTURE NOTE")
                 self.logger.log(self.camera_id, display_label(p.voter.role),
-                                "POSTURE NOTE", full, "normal")
-                self.logger.save_evidence(frame, box, self.camera_id,
-                                          "customer", "POSTURE NOTE")
+                                "POSTURE NOTE", full, "normal", image_path=img)
 
     def _log_recognition(self, p, prev_role, role):
         """Timeline correction when face recognition identifies someone AFTER
@@ -200,15 +201,27 @@ class TrackManager:
                             f"'{was}' entries in this period were this staff member",
                             "normal", therapist_id=staff_therapist_id(p.voter.name))
 
-    def _in_service_zone(self, box, frame_shape):
-        """True when the box center sits inside one of this camera's
-        customer-service zones."""
+    @staticmethod
+    def _center_in(box, frame_shape, zones):
+        """True when the box CENTER (fraction of frame) sits in any zone."""
         h, w = frame_shape[:2]
         cx = (box[0] + box[2]) / 2 / w
         cy = (box[1] + box[3]) / 2 / h
         return any(zx1 < cx < zx2 and zy1 < cy < zy2
-                   for zx1, zy1, zx2, zy2
-                   in self.cfg.get("service_zones", {}).get(self.camera_id, []))
+                   for zx1, zy1, zx2, zy2 in zones)
+
+    def _in_service_zone(self, box, frame_shape):
+        """True when the box center sits inside a customer-service zone."""
+        return self._center_in(box, frame_shape,
+                               self.cfg.get("service_zones", {}).get(self.camera_id, []))
+
+    def _drop_ignored(self, detections, frame_shape):
+        """Remove detections whose center is in an ignore zone (edge workers
+        who flicker in/out and would spam ENTER/LEAVE)."""
+        if not self.ignore_zones:
+            return detections
+        return [d for d in detections
+                if not self._center_in(d["box"], frame_shape, self.ignore_zones)]
 
     def _phone_holders(self, phones, rows, frame_shape):
         """Track ids that are HOLDING a phone right now. Each phone belongs
@@ -286,6 +299,8 @@ class TrackManager:
     def update(self, now, frame, detections, poses, phones):
         """Feed one analysis pass. Returns display dicts for the overlay:
         [{"box", "label", "role", "state", "tag", "line2"}]."""
+        # drop edge-of-frame flicker first, for every camera mode
+        detections = self._drop_ignored(detections, frame.shape)
         if self.watch_only:
             # public-space view: boxes only, no tracking state, no analysis,
             # no events, no images
@@ -387,14 +402,14 @@ class TrackManager:
                 self.greet_watch, self.greet_last = None, now
             elif now >= deadline:
                 started = deadline - self.cfg["greeting_secs"]
+                img = self.logger.save_evidence(frame, cust.box, self.camera_id,
+                                                "STAFF", "GREETING MISSED",
+                                                duration=self.cfg["greeting_secs"],
+                                                started=started)
                 self.logger.log(self.camera_id, "STAFF", "GREETING MISSED",
                                 f"customer arrived {_clock(started)}, no staff "
                                 f"stood up within {int(self.cfg['greeting_secs'])}s",
-                                "alert")
-                self.logger.save_evidence(frame, cust.box, self.camera_id,
-                                          "STAFF", "GREETING MISSED",
-                                          duration=self.cfg["greeting_secs"],
-                                          started=started)
+                                "alert", image_path=img)
                 self.greet_watch, self.greet_last = None, now
 
         # leave events: a track unseen for track_grace seconds is gone
