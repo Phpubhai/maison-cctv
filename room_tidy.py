@@ -93,7 +93,7 @@ class TidyMonitor:
                 self.logger.log(self.camera_id, "STAFF", "ROOM MESSY",
                                 f"room differs from the tidy reference "
                                 f"({frac:.0%} of view) since {_clock(self.messy_since)} "
-                                f"while empty", "alert", image_path=img)
+                                f"while empty", "alert", image_path=img, duration=held)
         else:
             if self.alerted:
                 self.logger.log(self.camera_id, "STAFF", "ROOM TIDY",

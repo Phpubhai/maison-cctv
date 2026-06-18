@@ -124,21 +124,21 @@ class TrackManager:
                 self.logger.log(self.camera_id, label, "SLEEPING",
                                 f"{why}, started {_clock(p.sleep_started)} "
                                 f"({int(p.held)}s so far)", "alert",
-                                therapist_id=tid, image_path=img)
+                                therapist_id=tid, image_path=img, duration=p.held)
         elif prev == "sleeping":
             # episode over: log how long it lasted in total
             dur = now - (p.sleep_started or now)
             self.logger.log(self.camera_id, label, "SLEEPING END",
                             f"awake again, slept ~{int(dur)}s total "
                             f"({_clock(p.sleep_started)} - {_clock(now)})", "normal",
-                            therapist_id=tid)
+                            therapist_id=tid, duration=dur)
             p.sleep_started = None
         elif p.state == "drowsy" and prev == "active":
             if self._cooldown_ok(p, "DROWSY", now):
                 self.logger.log(self.camera_id, label, "DROWSY",
                                 f"{why}, started {_clock(now - p.held)} "
                                 f"({int(p.held)}s so far)", "warning",
-                                therapist_id=tid)
+                                therapist_id=tid, duration=p.held)
 
         # phone: timer runs only while THIS person is the one holding a
         # phone (nearest-wrist ownership, resolved in _phone_holders --
@@ -159,7 +159,7 @@ class TrackManager:
             self.logger.log(self.camera_id, label, "PHONE USE",
                             f"phone in hand, started {_clock(p.phone_since)} "
                             f"({int(now - p.phone_since)}s so far)", "alert",
-                            therapist_id=tid, image_path=img)
+                            therapist_id=tid, image_path=img, duration=now - p.phone_since)
             p.phone_announced = True
 
     def _end_phone(self, p, label):
@@ -170,7 +170,7 @@ class TrackManager:
             self.logger.log(self.camera_id, label, "PHONE USE END",
                             f"phone put away, used ~{int(dur)}s total "
                             f"({_clock(p.phone_since)} - {_clock(p.phone_seen)})", "normal",
-                            therapist_id=staff_therapist_id(p.voter.name))
+                            therapist_id=staff_therapist_id(p.voter.name), duration=dur)
         p.phone_since, p.phone_announced = None, False
 
     def _analyze_customer(self, p, now, frame, box, pts, kconf):
@@ -409,7 +409,8 @@ class TrackManager:
                 self.logger.log(self.camera_id, "STAFF", "GREETING MISSED",
                                 f"customer arrived {_clock(started)}, no staff "
                                 f"stood up within {int(self.cfg['greeting_secs'])}s",
-                                "alert", image_path=img)
+                                "alert", image_path=img,
+                                duration=self.cfg["greeting_secs"])
                 self.greet_watch, self.greet_last = None, now
 
         # leave events: a track unseen for track_grace seconds is gone
@@ -425,7 +426,7 @@ class TrackManager:
                     self.logger.log(self.camera_id, label, "SLEEPING END",
                                     f"left frame, slept ~{int(dur)}s total "
                                     f"({_clock(p.sleep_started)} - {_clock(p.last_seen)})",
-                                    "normal", therapist_id=p_tid)
+                                    "normal", therapist_id=p_tid, duration=dur)
                 self._end_phone(p, label)
                 if p.announced:
                     self.logger.log(self.camera_id, label,

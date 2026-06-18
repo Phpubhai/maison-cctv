@@ -26,6 +26,8 @@ local_settings.py
 .secret
 .secret.*
 *.key
+# launcher env file — holds the shared API_KEY (the run-*.bat themselves are safe)
+cctv-env.bat
 
 # ── Runtime output / evidence images / logs ──────────────────────────────
 bookings_cache.json

@@ -15,7 +15,8 @@ from collections import defaultdict, deque
 
 import cv2
 
-from event_store import EventStore
+import event_pusher
+from event_store import EventStore, is_pushable
 
 try:
     from websockets.asyncio.server import serve
@@ -70,6 +71,10 @@ class TimelineLogger:
                         pass
         except Exception as e:
             print(f"event store disabled ({e}) -> jsonl only", flush=True)
+        # realtime push to the POS timeline server (None if not configured)
+        self.pusher = event_pusher.maybe_start(cfg)
+        # customer enter/leave only counts as a shop arrival at the entrance
+        self.customer_flow_cameras = cfg.get("customer_flow_cameras") or []
         if serve is None:
             print("websockets not installed -> events.jsonl only, no broadcast", flush=True)
         else:
@@ -77,9 +82,20 @@ class TimelineLogger:
                              args=(cfg["ws_host"], cfg["ws_port"]), daemon=True).start()
 
     # --- public API -------------------------------------------------------
+    def _should_push(self, camera_id, event, severity, actor_type):
+        """Which events reach the POS timeline. Same base subset as the store
+        (penalties + customer + warning/alert), except customer ENTER/LEAVE,
+        which only counts as a shop arrival at the entrance camera(s)."""
+        if not is_pushable(event, severity, actor_type):
+            return False
+        if actor_type == "customer" and event in ("ENTER", "LEAVE"):
+            return camera_id in self.customer_flow_cameras
+        return True
+
     def log(self, camera_id, label, event, description, severity,
-            therapist_id=None, image_path=None):
+            therapist_id=None, image_path=None, duration=None):
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        actor_type, actor_name = _split_actor(label)
         entry = {
             "timestamp": ts,
             "camera_id": camera_id,
@@ -93,11 +109,34 @@ class TimelineLogger:
         # SQLite history (the queryable time/who/what table)
         if self.store is not None:
             try:
-                actor_type, actor_name = _split_actor(label)
                 self.store.add(ts, camera_id, actor_type, actor_name,
                                therapist_id, event, description, severity, image_path)
             except Exception as e:
                 print(f"event store write failed: {e}", flush=True)
+        # realtime push to the POS timeline: same subset the store marks
+        # pushable (penalties + customer events). who = name, else role.
+        if self.pusher is not None and self._should_push(camera_id, event,
+                                                         severity, actor_type):
+            who = actor_name or {"customer": "ลูกค้า", "staff": "STAFF"}.get(actor_type)
+            meta = {"severity": severity, "description": description,
+                    "therapist_id": therapist_id}
+            # snapshot stays local; send a URL the POS can open (served by the
+            # event server's /snapshot route, key-protected, LAN only)
+            if image_path:
+                try:
+                    rel = os.path.relpath(image_path,
+                                          os.path.dirname(os.path.abspath(__file__)))
+                    meta["image_url"] = "/snapshot/" + rel.replace("\\", "/")
+                except ValueError:
+                    pass                        # different drive -> no url
+            self.pusher.push({
+                "ts": ts,                       # เวลา (shop local time)
+                "camera_id": camera_id,
+                "label": event,                 # ทำอะไร (SLEEPING / PHONE USE ...)
+                "actor": who,                   # ใคร (staff name / customer)
+                "duration": duration,           # นานแค่ไหน (seconds, may be None)
+                "meta": meta,
+            })
         # each camera also keeps its own human-readable timeline .txt
         # (openable in Notepad); the combined events.jsonl is for software
         txt = (f"[{entry['timestamp']}] {entry['event']:<12} "

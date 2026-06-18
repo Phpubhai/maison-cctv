@@ -20,6 +20,12 @@ except ImportError:
         "NVR_URL", "rtsp://USER:PASSWORD@HOST:554/user=USER&password=PASSWORD&channel={ch}")
     POS_API_KEY = os.environ.get("POS_API_KEY", "")
 
+# Realtime push to the event server (yolo-server). Reads the SAME env vars the
+# launcher (cctv-env.bat) exports, so the monitor and the standalone client
+# share one key. Auto-disabled when not set -> no behavior change.
+EVENT_PUSH_URL = os.environ.get("SERVER_URL", "")
+EVENT_PUSH_KEY = os.environ.get("API_KEY", "")
+
 CONFIG = {
     # --- cameras ----------------------------------------------------------
     # All streams come from the NVR server: one box, one credential, one
@@ -204,6 +210,11 @@ CONFIG = {
     "greeting_secs": 30.0,
     "greeting_cooldown": 180.0,
 
+    # customer ENTER/LEAVE = "entered/left the SHOP" -> only the entrance
+    # camera(s) count. A customer walking into foot spa / reception is not an
+    # arrival, so those don't reach the POS timeline (still recorded locally).
+    "customer_flow_cameras": ["front door"],
+
     # --- room tidiness (penalty) ---------------------------------------------
     # cameras watched for an untidy room: compared against a reference
     # snapshot of the TIDY room, judged only while the room is EMPTY.
@@ -285,6 +296,15 @@ CONFIG = {
     # push the penalty+customer subset to the POS Cloud Function (Firestore).
     # base_url/api_key come from local_settings.py (POS_API_KEY) when ready.
     "pos_timeline": {"enabled": False, "poll_secs": 5, "batch": 25},
+
+    # realtime push of the SAME penalty+customer subset to the LAN/VPS event
+    # server (yolo-server) -> the POS timeline page. Driven by SERVER_URL +
+    # API_KEY env (set by run-monitor.bat / cctv-env.bat). Off when unset.
+    "event_push": {
+        "enabled": bool(EVENT_PUSH_URL and EVENT_PUSH_KEY),
+        "server_url": EVENT_PUSH_URL,
+        "api_key": EVENT_PUSH_KEY,
+    },
 
     # --- GPU survival (this PC's driver crashes under sustained load) -------
     "gpu_temp_pause": 80,         # pause all analysis at this temperature

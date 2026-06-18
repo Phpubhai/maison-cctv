@@ -130,7 +130,7 @@ class FloorWatch:
                 self.logger.log(self.camera_id, "STAFF", self.event,
                                 f"{what} on {self.where} since "
                                 f"{_clock(self.pending_since)} (room empty)",
-                                "alert", image_path=img)
+                                "alert", image_path=img, duration=held)
         else:
             if self.alerted:
                 self.logger.log(self.camera_id, "STAFF", self.clear_event,

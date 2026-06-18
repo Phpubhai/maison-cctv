@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCTV Timeline</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+         background: #0e1116; color: #e6edf3; }
+  header { position: sticky; top: 0; background: #161b22; border-bottom: 1px solid #30363d;
+           padding: 12px 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  input { background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
+          border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  button { background: #238636; border: 0; color: #fff; border-radius: 6px;
+           padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  button.off { background: #30363d; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #6e7681; }
+  #dot.on { background: #2ea043; box-shadow: 0 0 8px #2ea043; }
+  #status { font-size: 12px; color: #8b949e; }
+  main { max-width: 900px; margin: 0 auto; padding: 0 16px 40px; }
+  /* 4 columns: เวลา / ใคร / ทำอะไร / นานแค่ไหน */
+  .grid { display: grid; grid-template-columns: 96px 200px 1fr 110px; gap: 12px; }
+  .head { position: sticky; top: 53px; background: #0e1116; border-bottom: 1px solid #30363d;
+          padding: 10px 12px; font-size: 12px; color: #8b949e; font-weight: 600;
+          text-transform: uppercase; letter-spacing: .03em; }
+  .row { align-items: baseline; padding: 11px 12px; border-bottom: 1px solid #1b2027;
+         animation: in .35s ease; }
+  .row:hover { background: #11161d; }
+  @keyframes in { from { opacity: 0; transform: translateY(-6px); background: #15351f; } }
+  .time { color: #8b949e; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .who { font-weight: 600; }
+  .who.staff { color: #7ee787; }
+  .who.customer { color: #79c0ff; }
+  .who.unknown { color: #8b949e; font-weight: 400; }
+  .cam { display: inline-block; background: #21262d; color: #8b949e; border-radius: 999px;
+         padding: 0 7px; font-size: 11px; margin-left: 6px; vertical-align: middle; }
+  .what .label { font-weight: 600; }
+  .count { color: #d29922; font-size: 13px; }
+  .shot { display: inline-block; margin-left: 8px; vertical-align: middle; }
+  .shot img { height: 34px; border-radius: 4px; border: 1px solid #30363d;
+              vertical-align: middle; cursor: zoom-in; transition: transform .1s; }
+  .shot img:hover { transform: scale(1.04); border-color: #58a6ff; }
+  .dur { color: #d29922; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .dur.none { color: #4d5560; }
+  .empty { color: #6e7681; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CCTV Timeline</h1>
+  <input id="server" size="22" placeholder="http://192.168.1.67:8080">
+  <input id="key" size="14" placeholder="API key" type="password">
+  <button id="connect">เชื่อมต่อ</button>
+  <span id="dot"></span><span id="status">ยังไม่เชื่อมต่อ</span>
+</header>
+<main>
+  <div class="grid head"><div>เวลา</div><div>ใคร</div><div>ทำอะไร</div><div>นานแค่ไหน</div></div>
+  <div id="list"><div class="empty">ใส่ที่อยู่ server กับ key แล้วกดเชื่อมต่อ</div></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const list = $("list"), dot = $("dot"), status = $("status");
+let es = null;
+let BASE = "", KEY = "";          // set on connect; used to build snapshot URLs
+
+// remember last settings in the browser so staff don't retype
+$("server").value = localStorage.getItem("server") || location.origin.replace(/:\d+$/, ":8080");
+$("key").value = localStorage.getItem("key") || "";
+
+function fmtDur(s) {                       // seconds -> "5 วิ" / "3 นาที" / "1 ชม 5 น"
+  if (s == null || isNaN(s)) return null;
+  s = Math.round(s);
+  if (s < 60) return `${s} วิ`;
+  if (s < 3600) { const m = Math.floor(s / 60), r = s % 60;
+                  return r ? `${m} นาที ${r} วิ` : `${m} นาที`; }
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return m ? `${h} ชม ${m} น` : `${h} ชม`;
+}
+
+function whoCell(ev) {                     // ใคร: staff name / customer / unknown
+  const a = ev.actor;
+  if (!a) return `<div class="who unknown">—</div>`;
+  const low = String(a).toLowerCase();
+  const cls = (low.includes("customer") || low.includes("ลูกค้า")) ? "customer" : "staff";
+  return `<div class="who ${cls}">${a}</div>`;
+}
+
+function fmt(ev) {
+  const t = (ev.ts || ev.received || "").replace("T", " ").replace("Z", "");
+  const time = t.slice(11) || t;
+  const cnt = ev.count != null && ev.count > 1 ? `<span class="count">×${ev.count}</span>` : "";
+  const cam = ev.camera_id ? `<span class="cam">${ev.camera_id}</span>` : "";
+  const dur = fmtDur(ev.duration);
+  const iu = ev.meta && ev.meta.image_url;       // snapshot link (key-protected)
+  const shot = iu
+    ? `<a class="shot" href="${BASE}${iu}?key=${encodeURIComponent(KEY)}" target="_blank">`
+      + `<img loading="lazy" src="${BASE}${iu}?key=${encodeURIComponent(KEY)}" alt="snapshot"></a>`
+    : "";
+  const row = document.createElement("div");
+  row.className = "grid row";
+  row.innerHTML =
+    `<div class="time">${time}</div>` +
+    whoCell(ev) +
+    `<div class="what"><span class="label">${ev.label || "?"}</span> ${cnt} ${cam}${shot}</div>` +
+    (dur ? `<div class="dur">${dur}</div>` : `<div class="dur none">—</div>`);
+  return row;
+}
+
+function prepend(ev) {
+  if (list.querySelector(".empty")) list.innerHTML = "";
+  list.insertBefore(fmt(ev), list.firstChild);
+  while (list.children.length > 300) list.removeChild(list.lastChild);  // cap DOM
+}
+
+async function connect() {
+  const base = $("server").value.replace(/\/$/, "");
+  const key = $("key").value;
+  BASE = base; KEY = key;          // fmt() builds snapshot URLs from these
+  localStorage.setItem("server", base);
+  localStorage.setItem("key", key);
+  if (es) es.close();
+  list.innerHTML = "";
+
+  // 1) backfill recent history (newest first from server -> show oldest first)
+  try {
+    const r = await fetch(`${base}/events?limit=50&key=${encodeURIComponent(key)}`,
+                          { headers: { "X-API-Key": key } });
+    if (r.status === 401) { status.textContent = "key ผิด (401)"; return; }
+    const data = await r.json();
+    data.events.reverse().forEach(prepend);
+  } catch (e) { status.textContent = "ต่อ server ไม่ได้ — เช็ค IP/พอร์ต/firewall"; return; }
+
+  // 2) live stream
+  es = new EventSource(`${base}/stream?key=${encodeURIComponent(key)}`);
+  es.onopen = () => { dot.className = "on"; status.textContent = "เชื่อมต่อแล้ว — รับ event สด"; };
+  es.onmessage = (m) => prepend(JSON.parse(m.data));
+  es.onerror = () => { dot.className = ""; status.textContent = "หลุด — กำลังต่อใหม่…"; };
+}
+
+$("connect").onclick = connect;
+if ($("server").value && $("key").value) connect();   // auto-connect if remembered
+</script>
+</body>
+</html>
