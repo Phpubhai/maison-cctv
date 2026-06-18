@@ -178,6 +178,23 @@ CONFIG = {
     "enroll_consistency": 0.55,   # min cosine among a track's own samples
                                   # (proves they're one stable person, not noise)
 
+    # --- duplicate reduction (2026-06-17) ------------------------------------
+    # CCTV faces of the SAME person across sessions sometimes score below the
+    # match threshold -> a duplicate id is created. We fight this at the root
+    # by ENRICHING a person's profile with new angles every time they're
+    # re-recognized (so future captures match), and SUGGEST (never auto-merge)
+    # likely duplicates for one-click human confirmation.
+    "enrich_enabled": True,
+    "enrich_min_sim": 0.55,       # a re-seen sample must clearly be the owner
+                                  # (> match threshold) before joining the profile
+    "enrich_max_sim": 0.92,       # ...but different enough to add a NEW angle
+                                  # (near-identical frames are skipped)
+    "face_samples_cap": 30,       # max embeddings per person; when full, drop
+                                  # the most-redundant one to keep angles diverse
+    "dup_suggest_sim": 0.42,      # new id whose best existing match is in
+    "dup_margin": 0.05,           # [dup_suggest_sim, match) by this margin ->
+                                  # logged as a suspected duplicate (not merged)
+
     # --- greeting rule (penalty) ---------------------------------------------
     # when a NEW customer enters one of these cameras, at least one STAFF
     # must be STANDING within greeting_secs -- otherwise GREETING MISSED
@@ -217,7 +234,22 @@ CONFIG = {
     #   },
     # "ref" (a clean-floor snapshot) is optional but REQUIRED to catch cloth:
     # the object model has no towel class, fabric is found by reference diff.
-    "floor_watch": {},
+    "floor_watch": {
+        # reception: tea glasses left on the white tables in front of the sofa.
+        # Clear-glass + glass-partition reflections make YOLO detection weak,
+        # so this leans on the reference diff -> needs a CLEAN-table snapshot
+        # at the ref path (capture once the table is tidy). Judged only when
+        # the lounge is empty; must persist `secs` to ride out reflections.
+        "reception": {
+            "zone": (0.12, 0.44, 0.40, 0.78),     # the round white tables
+            "ref": os.path.join(_HERE, "table_ref_reception.jpg"),
+            "event": "UNCLEARED TABLE",
+            "clear_event": "TABLE CLEARED",
+            "where": "the reception table",
+            "secs": 300.0,                         # left 5 min while empty -> alert
+            "diff_frac": 0.06,                     # higher than floor (reflections)
+        },
+    },
     "floor_secs": 60.0,         # object on the floor this long -> alert
     "floor_diff_frac": 0.04,    # zone fraction changed vs clean ref = object
     "floor_obj_conf": 0.25,     # cup/glass/bottle detection threshold

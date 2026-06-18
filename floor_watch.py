@@ -39,6 +39,13 @@ class FloorWatch:
         self.cfg = cfg
         self.logger = logger
         self.zone = spec["zone"]  # (x1, y1, x2, y2) fractions of the frame
+        # per-binding wording + thresholds (a table reads differently from a
+        # floor); fall back to the floor_* defaults
+        self.event = spec.get("event", "OBJECT ON FLOOR")
+        self.clear_event = spec.get("clear_event", "FLOOR CLEAR")
+        self.where = spec.get("where", "the floor")
+        self.secs = spec.get("secs", cfg["floor_secs"])
+        self.diff_frac = spec.get("diff_frac", cfg["floor_diff_frac"])
         self.ref = None
         ref_path = spec.get("ref")
         if ref_path:
@@ -90,9 +97,9 @@ class FloorWatch:
             sx2, sy2 = int(self.zone[2] * _W), int(self.zone[3] * _H)
             d = cv2.absdiff(self._prep(frame), self.ref)[sy1:sy2, sx1:sx2]
             mask = d > self.cfg["tidy_pixel_thresh"]
-            if float(mask.mean()) >= self.cfg["floor_diff_frac"]:
+            if float(mask.mean()) >= self.diff_frac:
                 if not found:
-                    found.append("unknown object (cloth?)")
+                    found.append("unknown object")
                 if box is None:
                     ys, xs = np.nonzero(mask)
                     box = [(sx1 + xs.min()) / _W * w, (sy1 + ys.min()) / _H * h,
@@ -112,20 +119,21 @@ class FloorWatch:
         if found:
             self.pending_since = self.pending_since or now
             held = now - self.pending_since
-            if (held >= self.cfg["floor_secs"]
+            if (held >= self.secs
                     and now - self.last_alert >= self.cfg["re_alert_secs"]):
                 self.last_alert = now
                 self.alerted = True
                 what = ", ".join(sorted(set(found)))
                 img = self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
-                                                "OBJECT ON FLOOR", duration=held,
+                                                self.event, duration=held,
                                                 started=self.pending_since)
-                self.logger.log(self.camera_id, "STAFF", "OBJECT ON FLOOR",
-                                f"{what} on the floor since "
-                                f"{_clock(self.pending_since)}", "alert", image_path=img)
+                self.logger.log(self.camera_id, "STAFF", self.event,
+                                f"{what} on {self.where} since "
+                                f"{_clock(self.pending_since)} (room empty)",
+                                "alert", image_path=img)
         else:
             if self.alerted:
-                self.logger.log(self.camera_id, "STAFF", "FLOOR CLEAR",
-                                f"floor cleared, object was there "
+                self.logger.log(self.camera_id, "STAFF", self.clear_event,
+                                f"{self.where} cleared, was there "
                                 f"~{int(now - self.pending_since)}s", "normal")
             self.pending_since, self.alerted = None, False

@@ -41,7 +41,7 @@ def _split_actor(label):
 class TimelineLogger:
     # staff-misbehavior evidence is quarantined in its own folder
     PENALTY_EVENTS = {"SLEEPING", "PHONE USE", "GREETING MISSED", "ROOM MESSY",
-                      "OBJECT ON FLOOR"}
+                      "OBJECT ON FLOOR", "UNCLEARED TABLE"}
 
     def __init__(self, cfg):
         self.path = cfg["events_path"]

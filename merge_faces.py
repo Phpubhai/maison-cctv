@@ -26,8 +26,13 @@ for d in dups:
     p = os.path.join(fd, f"{d}.npz")
     feats.append(np.load(p)["feats"])
 merged = np.concatenate(feats, axis=0)
+# keep the profile diverse and bounded (same cap as auto-enrollment)
+from face_enroller import prune_to_cap
+before = merged.shape[0]
+merged = prune_to_cap(merged, CONFIG.get("face_samples_cap", 30))
 np.savez(keep_path, feats=merged)
-print(f"{keep}: {merged.shape[0]} embeddings after merge")
+print(f"{keep}: {merged.shape[0]} embeddings after merge"
+      + (f" (pruned from {before} to cap)" if before > merged.shape[0] else ""))
 
 # drop the duplicate files + registry entries
 for d in dups:

@@ -15,6 +15,25 @@ import numpy as np
 import person_labeler
 
 
+def _cos(a, b):
+    """Cosine similarity of two 1-D vectors (SFace's FR_COSINE metric)."""
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    return float(a @ b / (na * nb)) if na and nb else 0.0
+
+
+def prune_to_cap(feats, cap):
+    """Trim a person's embeddings to `cap`, dropping the MOST REDUNDANT ones
+    (highest total similarity to the rest) so the kept set stays diverse.
+    Model-free (numpy cosine) so merge_faces can reuse it. feats: (n, d)."""
+    feats = np.asarray(feats)
+    while len(feats) > cap:
+        # redundancy score = sum of cosine to every other embedding
+        red = [sum(_cos(feats[i], feats[j]) for j in range(len(feats)) if j != i)
+               for i in range(len(feats))]
+        feats = np.delete(feats, int(np.argmax(red)), axis=0)
+    return feats
+
+
 class AutoEnroller:
     """Feeds off the office camera. Shares the live FaceMatcher so a newly
     enrolled face is recognized everywhere immediately, no restart."""
@@ -28,7 +47,6 @@ class AutoEnroller:
                                              cfg["enroll_min_score"])
         self.rec = cv2.FaceRecognizerSF.create(cfg["face_rec_model"], "")
         self.samples = {}   # track id -> [(embedding, crop), ...] not-yet-known
-        self.resolved = {}  # track id -> "known" / "enrolled" (stop sampling)
         self.last_cap = {}  # track id -> last capture time
         self.ident = {}     # track id -> matched/enrolled face id (for naming)
 
@@ -39,15 +57,20 @@ class AutoEnroller:
                 n = max(n, int(name[6:]))
         return f"staff_{n + 1:02d}"
 
-    def _matches_known(self, emb):
-        """Face id of the best enrolled match (>= threshold), or None."""
-        best_name, best = None, 0.0
+    def _best_match(self, emb):
+        """(best_name, best_sim, second_sim) over enrolled people -- best sim
+        per person, then the top two people. For both the dedup decision and
+        the gray-zone duplicate suggestion."""
+        per = []
         for name, feats in self.fm.known:
-            for f in feats:
-                s = self.rec.match(emb, f.reshape(1, -1), cv2.FaceRecognizerSF_FR_COSINE)
-                if s >= self.cfg["face_match_cosine"] and s > best:
-                    best, best_name = s, name
-        return best_name
+            s = max((self.rec.match(emb, f.reshape(1, -1),
+                                    cv2.FaceRecognizerSF_FR_COSINE) for f in feats),
+                    default=0.0)
+            per.append((s, name))
+        per.sort(reverse=True)
+        best = per[0] if per else (0.0, None)
+        second = per[1][0] if len(per) > 1 else 0.0
+        return best[1], best[0], second
 
     def identity(self, tid):
         """Enrolled face id this track has been matched/enrolled to, or None."""
@@ -55,8 +78,28 @@ class AutoEnroller:
 
     def forget(self, tid):
         """Drop per-track state when a person leaves (called on LEAVE)."""
-        for d in (self.samples, self.resolved, self.last_cap, self.ident):
+        for d in (self.samples, self.last_cap, self.ident):
             d.pop(tid, None)
+
+    def _enrich(self, name, emb):
+        """Add a re-seen owner sample to their profile to cover a new angle.
+        Guards: must clearly be the owner AND add diversity; cap kept."""
+        if not self.cfg.get("enrich_enabled"):
+            return
+        for i, (n, feats) in enumerate(self.fm.known):
+            if n != name:
+                continue
+            sims = [_cos(emb.flatten(), f) for f in feats]
+            top = max(sims) if sims else 0.0
+            if top < self.cfg["enrich_min_sim"]:
+                return  # borderline -- don't risk polluting the profile
+            if top > self.cfg["enrich_max_sim"]:
+                return  # near-identical to an existing angle -- redundant
+            feats = np.vstack([feats, emb.flatten()])
+            feats = prune_to_cap(feats, self.cfg["face_samples_cap"])
+            self.fm.known[i] = (n, feats)
+            np.savez(os.path.join(self.cfg["faces_dir"], f"{name}.npz"), feats=feats)
+            return
 
     def _embed(self, frame, box):
         """(embedding, aligned 112x112 face crop) for the best frontal face
@@ -86,19 +129,21 @@ class AutoEnroller:
         if not self.cfg.get("auto_enroll"):
             return
         for tid, box in rows:
-            if self.resolved.get(tid):
-                continue
             if now - self.last_cap.get(tid, 0) < self.cfg["enroll_check_every"]:
                 continue
             self.last_cap[tid] = now
             emb, crop = self._embed(frame, box)
             if emb is None:
                 continue
-            match = self._matches_known(emb)
-            if match:
-                self.resolved[tid] = "known"   # already enrolled -- leave alone
-                self.ident[tid] = match
+            name, best, second = self._best_match(emb)
+            if name and best >= self.cfg["face_match_cosine"]:
+                # already enrolled -> don't create a duplicate; enrich the
+                # profile with this new angle so future captures keep matching.
                 self.samples.pop(tid, None)
+                # only attach the displayed name when the match is unambiguous
+                if best - second >= self.cfg["face_match_margin"]:
+                    self.ident[tid] = name
+                self._enrich(name, emb)
                 continue
             self.samples.setdefault(tid, []).append((emb, crop))
             if len(self.samples[tid]) >= self.cfg["enroll_samples"]:
@@ -115,6 +160,13 @@ class AutoEnroller:
         if not sims or (sum(sims) / len(sims)) < self.cfg["enroll_consistency"]:
             self.samples[tid] = samples[-self.cfg["enroll_samples"]:]  # keep sampling
             return
+        # before creating a new id, check whether it's likely a DUPLICATE of
+        # an existing person (gray zone below the match threshold) -- we still
+        # create the id (auto-merge would risk fusing two people on CCTV) but
+        # flag it for one-click human confirmation.
+        avg = np.mean(np.stack([e.flatten() for e in embs]), axis=0)
+        near_name, near_best, near_second = self._best_match(avg.reshape(1, -1).astype(np.float32))
+
         name = self._next_id()
         feats = np.stack([e.flatten() for e in embs])
         np.savez(os.path.join(self.cfg["faces_dir"], f"{name}.npz"), feats=feats)
@@ -125,12 +177,29 @@ class AutoEnroller:
         # register with the live matcher so every camera knows them now
         self.fm.known.append((name, feats))
         self._add_to_registry(name)
-        self.resolved[tid] = "enrolled"
         self.ident[tid] = name
         self.samples.pop(tid, None)
         self.logger.log(self.camera_id, f"STAFF:{name}", "STAFF ENROLLED",
                         f"new staff face auto-enrolled as {name} -- set a name "
                         f"in staff.json", "normal")
+        if (near_name and self.cfg["dup_suggest_sim"] <= near_best < self.cfg["face_match_cosine"]
+                and near_best - near_second >= self.cfg["dup_margin"]):
+            self._suggest_duplicate(name, near_name, near_best)
+
+    def _suggest_duplicate(self, new_id, existing, sim):
+        """Flag (do NOT merge) a likely duplicate for human confirmation."""
+        self.logger.log(self.camera_id, f"STAFF:{new_id}", "FACE DUP SUSPECT",
+                        f"{new_id} may be the same person as {existing} "
+                        f"(sim {sim:.2f}) -- review: python merge_faces.py "
+                        f"{existing} {new_id}", "normal")
+        try:
+            line = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {new_id} ~ {existing}"
+                    f"  sim={sim:.2f}  -> python merge_faces.py {existing} {new_id}\n")
+            with open(os.path.join(self.cfg["faces_dir"], "suspected_duplicates.txt"),
+                      "a", encoding="utf-8") as f:
+                f.write(line)
+        except OSError:
+            pass
 
     def _add_to_registry(self, name):
         path = self.cfg["staff_registry"]

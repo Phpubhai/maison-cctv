@@ -200,8 +200,15 @@ class RoleVoter:
         self.last_face_t = 0.0
 
     def update(self, now, frame, pts, kconf):
-        """Feed one sighting; returns the current role (or None)."""
-        # face check: rate-limited, skipped once the person is already staff
+        """Feed one sighting; returns the current role (or None).
+
+        Asymmetric stickiness: 'staff' is terminal (never downgraded), but
+        'customer' stays PROVISIONAL -- a customer (or undecided) keeps being
+        re-voted on the uniform, and is upgraded to staff if a sustained beige
+        majority later appears. This rescues staff who were locked as customer
+        from a few bad early frames (pose/lighting/occlusion). A face match
+        always wins -> staff."""
+        # face match overrides everything (incl. a wrong 'customer' lock)
         if (self.faces is not None and self.role != "staff"
                 and now - self.last_face_t >= self.cfg["face_check_every"]):
             self.last_face_t = now
@@ -210,8 +217,10 @@ class RoleVoter:
                 self.role, self.name = "staff", name
                 return self.role
 
-        if self.role is not None:
-            return self.role
+        if self.role == "staff":
+            return self.role          # staff is terminal -- never re-evaluate
+
+        # undecided OR provisionally-customer: keep voting on the uniform
         verdict = uniform_verdict(self.cfg, frame, pts, kconf)
         if verdict is not None:
             self.votes.append((now, verdict))
@@ -220,9 +229,9 @@ class RoleVoter:
         if len(self.votes) >= self.cfg["role_min_samples"]:
             staff_frac = sum(1 for _, v in self.votes if v) / len(self.votes)
             if staff_frac >= self.cfg["role_majority"]:
-                self.role = "staff"
-            elif staff_frac <= 1 - self.cfg["role_majority"]:
-                self.role = "customer"
+                self.role = "staff"   # decide, or UPGRADE customer -> staff
+            elif self.role is None and staff_frac <= 1 - self.cfg["role_majority"]:
+                self.role = "customer"   # only set customer when still undecided
         return self.role
 
 
