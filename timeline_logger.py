@@ -126,7 +126,9 @@ class TimelineLogger:
                 try:
                     rel = os.path.relpath(image_path,
                                           os.path.dirname(os.path.abspath(__file__)))
-                    meta["image_url"] = "/snapshot/" + rel.replace("\\", "/")
+                    rel = rel.replace("\\", "/")
+                    meta["image_url"] = "/snapshot/" + rel
+                    self.pusher.upload(rel, image_path)   # send the file up too
                 except ValueError:
                     pass                        # different drive -> no url
             self.pusher.push({

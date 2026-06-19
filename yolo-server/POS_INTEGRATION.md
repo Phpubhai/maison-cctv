@@ -90,9 +90,12 @@ e.g. `http://192.168.1.67:8080/snapshot/Penalty/20260618_..._SLEEPING.jpg?key=..
   anything outside the evidence folders (no config/secrets/faces leak).
 - Images are large full frames — use a thumbnail (`height ~40px`) linking to the
   full image, and `loading="lazy"`.
-- **Caveat (multi-branch later):** this works because the event server runs on
-  the same machine as the cameras. If you move to a remote hub, snapshots need a
-  different delivery (upload, or per-branch image URL) — TBD.
+- The camera **uploads** the snapshot to the server (`POST /snapshot/...`), so
+  the server keeps its own copy and serves it even when it runs on a different
+  machine than the cameras (a remote hub). The POS always just fetches
+  `{BASE}{meta.image_url}?key=...` — no change needed regardless of where the
+  server runs. A snapshot may lag the event by a moment while it uploads; the
+  thumbnail fills in on the next refresh.
 
 ### Event vocabulary (`label`) currently pushed to the POS
 

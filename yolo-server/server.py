@@ -41,6 +41,13 @@ SNAPSHOT_ROOT = os.environ.get(
     "SNAPSHOT_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SNAPSHOT_DIRS = ("Penalty", "behavior_events")     # allowlisted subtrees only
 IMG_EXT = (".jpg", ".jpeg", ".png")
+# the camera also UPLOADS snapshots here (POST /snapshot/...), so the server has
+# its own copy and can serve images even when it runs on a different machine
+# than the cameras (a hub). Served files are looked up here first, then in the
+# local evidence dirs above.
+UPLOAD_DIR = os.environ.get(
+    "UPLOAD_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots"))
+MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -178,9 +185,14 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    # --- POST /events -----------------------------------------------------
+    # --- POST /events | /snapshot ----------------------------------------
     def do_POST(self):
-        if urlparse(self.path).path.rstrip("/") != "/events":
+        p = urlparse(self.path).path
+        if p.startswith("/snapshot/"):
+            if not self._auth():
+                return
+            return self._recv_snapshot(p[len("/snapshot/"):])
+        if p.rstrip("/") != "/events":
             return self._json(404, {"error": "not found"})
         if not self._auth():
             return
@@ -223,28 +235,60 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_snapshot(path[len("/snapshot/"):])
         self._json(404, {"error": "not found"})
 
+    @staticmethod
+    def _safe_target(base, rel, restrict_subdirs):
+        """Resolve rel under base with realpath containment + image extension.
+        If restrict_subdirs, the first path segment must be allowlisted. Returns
+        the absolute path or None if it fails any check (traversal/ext/scope)."""
+        target = os.path.realpath(os.path.join(base, rel))
+        root = os.path.realpath(base)
+        if not (target == root or target.startswith(root + os.sep)):
+            return None
+        if restrict_subdirs:
+            sub = os.path.relpath(target, root).replace("\\", "/").split("/")[0]
+            if sub not in SNAPSHOT_DIRS:
+                return None
+        if os.path.splitext(target)[1].lower() not in IMG_EXT:
+            return None
+        return target
+
     def _serve_snapshot(self, rel):
-        """Serve a local evidence image, but ONLY files under an allowlisted
-        subtree of SNAPSHOT_ROOT (realpath-contained, image extension). Anything
-        else -> 404, so config/secrets/faces/db can never leak."""
+        """Serve an evidence image. Look in the server's uploaded copies first
+        (UPLOAD_DIR, any path), then the local evidence dirs (SNAPSHOT_ROOT,
+        allowlisted subtrees only). Anything else -> 404; no config/faces leak."""
         rel = unquote(rel)
-        target = os.path.realpath(os.path.join(SNAPSHOT_ROOT, rel))
-        root = os.path.realpath(SNAPSHOT_ROOT)
-        within = target == root or target.startswith(root + os.sep)
-        sub = os.path.relpath(target, root).replace("\\", "/").split("/")[0]
-        if (not within or sub not in SNAPSHOT_DIRS
-                or os.path.splitext(target)[1].lower() not in IMG_EXT
-                or not os.path.isfile(target)):
-            return self._json(404, {"error": "not found"})
-        with open(target, "rb") as f:
-            body = f.read()
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "max-age=31536000")  # images are immutable
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        for base, restrict in ((UPLOAD_DIR, False), (SNAPSHOT_ROOT, True)):
+            target = self._safe_target(base, rel, restrict)
+            if target and os.path.isfile(target):
+                with open(target, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "max-age=31536000")  # immutable
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                return self.wfile.write(body)
+        self._json(404, {"error": "not found"})
+
+    def _recv_snapshot(self, rel):
+        """Store an uploaded evidence image under UPLOAD_DIR so the server (even
+        on a different machine than the cameras) can serve it. Path is sanitized
+        + must be an image; oversized/garbage uploads are rejected."""
+        rel = unquote(rel)
+        n = int(self.headers.get("Content-Length", 0))
+        if n <= 0:
+            return self._json(400, {"error": "empty body"})
+        if n > MAX_UPLOAD:
+            return self._json(413, {"error": "too large"})
+        target = self._safe_target(UPLOAD_DIR, rel, False)
+        if not target:
+            return self._json(400, {"error": "bad path"})
+        data = self.rfile.read(n)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as f:
+            f.write(data)
+        self._json(201, {"stored": rel})
 
     def _sse(self):
         self.send_response(200)
@@ -276,10 +320,12 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     if not API_KEY:
         sys.exit("set API_KEY env (the shared secret with the camera client)")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     Handler.store = Store(DB_PATH)
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"event server on :{PORT}  (db={DB_PATH})  POST /events  GET /events  "
-          f"GET /stream  GET /health", flush=True)
+          f"GET /stream  GET/POST /snapshot  GET /health  (uploads={UPLOAD_DIR})",
+          flush=True)
     httpd.serve_forever()
 
 

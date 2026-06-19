@@ -304,6 +304,10 @@ CONFIG = {
         "enabled": bool(EVENT_PUSH_URL and EVENT_PUSH_KEY),
         "server_url": EVENT_PUSH_URL,
         "api_key": EVENT_PUSH_KEY,
+        # also UPLOAD the snapshot image to the server (so it has its own copy
+        # and can serve it even on a different machine). Set False to keep
+        # images local-only and let the POS pull them from this machine.
+        "push_snapshots": True,
     },
 
     # --- GPU survival (this PC's driver crashes under sustained load) -------
