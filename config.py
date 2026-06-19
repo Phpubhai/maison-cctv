@@ -349,6 +349,20 @@ CONFIG = {
             "secs": 300.0,                         # left 5 min while empty -> alert
             "diff_frac": 0.06,                     # higher than floor (reflections)
         },
+        # foot spa: items left on the floor (towels/slippers/cups). Zone from a
+        # colour-marked frame 2026-06-19 (right-side area by the basins/entrance).
+        # Reference = floor_ref_foot_spa.jpg -- RECAPTURE when the floor is tidy
+        # (the auto-grab may have caught items). Judged only while the room is
+        # empty. This is the ONLY alert foot spa keeps (sleep/phone are off).
+        "foot spa": {
+            "zone": (0.70, 0.19, 0.88, 1.0),
+            "ref": os.path.join(_HERE, "floor_ref_foot_spa.jpg"),
+            "event": "OBJECT ON FLOOR",
+            "clear_event": "FLOOR CLEARED",
+            "where": "the foot spa floor",
+            "secs": 120.0,                         # left 2 min while empty -> alert
+            "diff_frac": 0.05,
+        },
     },
     "floor_secs": 60.0,         # object on the floor this long -> alert
     "floor_diff_frac": 0.04,    # zone fraction changed vs clean ref = object
