@@ -25,6 +25,18 @@ def _clock(ts):
     return time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "?"
 
 
+def _point_in_poly(x, y, poly):
+    """Ray-casting test: is the (x, y) fraction inside the polygon [(x,y),...]?"""
+    n, inside, j = len(poly), False, len(poly) - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
 def iou(a, b):
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
     ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
@@ -65,6 +77,17 @@ class TrackManager:
         self.watch_only = camera_id in cfg.get("watch_only", [])
         self.presence = camera_id in cfg.get("presence_cameras", [])
         self.ignore_zones = cfg.get("ignore_zones", {}).get(camera_id, [])
+        # fixed staff positions (e.g. the reception desk seat): a person whose
+        # box center sits here is staff regardless of uniform/face -- rescues
+        # seated staff the uniform check keeps missing. (x1,y1,x2,y2) fractions.
+        self.staff_zones = cfg.get("staff_zones", {}).get(camera_id, [])
+        # rest zone (the staff break room): force staff AND skip penalty
+        # analysis -- resting (phone/nap) on break is not a violation. Value is
+        # either a list of (x1,y1,x2,y2) rects (rest INSIDE them), or a dict
+        # {"poly": [(x,y)...], "mode": "inside"|"outside"} for a polygon -- e.g.
+        # reception, where the whole staff room is everything OUTSIDE the glass
+        # lounge polygon.
+        self.rest_zone = cfg.get("rest_zones", {}).get(camera_id)
         self.people = {}  # internal track id -> _Tracked
         # greeting rule state (active on greeting_cameras only)
         self.greet_enabled = camera_id in cfg.get("greeting_cameras", [])
@@ -215,6 +238,26 @@ class TrackManager:
         return self._center_in(box, frame_shape,
                                self.cfg.get("service_zones", {}).get(self.camera_id, []))
 
+    def _in_staff_zone(self, box, frame_shape):
+        """True when the box center sits inside a fixed staff position."""
+        return bool(self.staff_zones) and self._center_in(
+            box, frame_shape, self.staff_zones)
+
+    def _in_rest_zone(self, box, frame_shape):
+        """True when the box center is in the staff rest zone (break room):
+        staff, but resting -- no penalty analysis. Supports rect lists and a
+        polygon with inside/outside mode."""
+        rz = self.rest_zone
+        if not rz:
+            return False
+        if isinstance(rz, dict):
+            h, w = frame_shape[:2]
+            cx = (box[0] + box[2]) / 2 / w
+            cy = (box[1] + box[3]) / 2 / h
+            inside = _point_in_poly(cx, cy, rz["poly"])
+            return (not inside) if rz.get("mode") == "outside" else inside
+        return self._center_in(box, frame_shape, rz)
+
     def _drop_ignored(self, detections, frame_shape):
         """Remove detections whose center is in an ignore zone (edge workers
         who flicker in/out and would spam ENTER/LEAVE)."""
@@ -333,6 +376,12 @@ class TrackManager:
         holders = self._phone_holders(phones, rows, frame.shape)
 
         for tid, box, p, pose in rows:
+            # fixed staff position (reception desk seat) or rest zone (break
+            # room): force staff regardless of uniform/face. 'staff' is
+            # terminal, so this sticks. resting staff also skip penalties below.
+            resting = self._in_rest_zone(box, frame.shape)
+            if p.voter.role != "staff" and (resting or self._in_staff_zone(box, frame.shape)):
+                p.voter.role = "staff"
             # entry is announced only after the track survives min_visible
             # AND the person has been classified -- detection flickers and
             # far-away unclassifiable blobs never reach the timeline
@@ -368,7 +417,9 @@ class TrackManager:
                 # is why standing posture cancels it
                 buried = face_hidden(kconf) and p.posture != "standing"
 
-                if role == "staff":
+                if resting:
+                    p.state = "active"    # break room: staff, but no penalties
+                elif role == "staff":
                     self._analyze_staff(p, now, frame, box, pts, kconf,
                                         head_down, buried, tid in holders)
                 elif role == "customer":

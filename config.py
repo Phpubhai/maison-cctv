@@ -58,6 +58,31 @@ CONFIG = {
         "office": [(0.0, 0.72, 0.68, 1.0)],   # desks along the bottom edge
     },
 
+    # staff zones: a fixed staff position WITHIN a camera. A person whose box
+    # center sits here is forced to STAFF regardless of uniform/face -- rescues
+    # seated staff the beige check keeps missing (the receptionist slumped at
+    # the desk reads as "customer"). Keep the box TIGHT around the seat so a
+    # customer standing nearby never falls in. (x1,y1,x2,y2) frame fractions.
+    # front door: the reception desk seat at the far LEFT, where Tan sits.
+    # CALIBRATE against a real frame if the seat moves (customers stand more to
+    # the center, by the pedicure chairs on the right).
+    "staff_zones": {
+        "front door": [(0.0, 0.45, 0.18, 1.0)],
+    },
+
+    # rest zones: like staff_zones, but ALSO skip penalty analysis -- the staff
+    # break room, where resting / phone / napping is allowed (force staff + no
+    # sleeping/phone/etc. alerts). Value is a list of (x1,y1,x2,y2) rects, OR a
+    # dict {"poly": [(x,y)...], "mode": "inside"|"outside"} for a polygon.
+    # reception IS the staff room, filmed through a glass window into the
+    # customer lounge -> everyone OUTSIDE the lounge polygon is resting staff.
+    # Polygon traces the lounge through the glass; CALIBRATE if the view shifts.
+    "rest_zones": {
+        "reception": {"mode": "outside", "poly": [
+            (0.05, 0.13), (0.32, 0.07), (0.62, 0.05), (0.80, 0.14), (0.83, 0.34),
+            (0.80, 0.54), (0.60, 0.60), (0.40, 0.74), (0.16, 0.79), (0.05, 0.70)]},
+    },
+
     # presence cameras: a staff-only room. Everyone in frame is logged as
     # STAFF on enter/leave (no uniform/face check needed -- only staff can be
     # here) but NO penalty analysis runs. For back rooms where normal staff
@@ -94,16 +119,24 @@ CONFIG = {
     "perclos_awake": 0.3,         # eyes closed <30% of window -> vetoes sleeping
 
     # --- phone use (staff only) --------------------------------------------
-    "phone_secs": 45.0,           # phone near a staff member this long -> alert
-    "phone_confidence": 0.18,     # phones are small and angled on CCTV.
+    # 2026-06-19: tightened to cut false positives -- massage staff hold oil
+    # bottles/tools that YOLO sparsely mis-tags as "cell phone". Trades some
+    # real-phone recall for far fewer false alerts (user's call). Levers below:
+    # higher detection thresholds + shorter grace (sparse mis-hits can no longer
+    # bridge a long gap to sustain the timer) + longer required dwell.
+    "phone_secs": 60.0,           # phone near a staff member this long -> alert
+    "phone_confidence": 0.22,     # phones are small and angled on CCTV.
                                   # Measured 2026-06-11 on the cashier desk:
                                   # phone propped against the monitor 0.27-0.50,
                                   # phone IN THE HAND (fingers wrap it) only
                                   # 0.19-0.23 and seen in ~1 frame out of 12
-    "phone_grace": 18.0,          # in-hand phones surface only every ~12s --
+    "phone_grace": 12.0,          # in-hand phones surface only every ~12s --
                                   # "phone near" stays alive this long between
-                                  # sightings so the dwell timer keeps running
-    "phone_crop_confidence": 0.25,  # threshold for the 2x-zoom second pass on
+                                  # sightings so the dwell timer keeps running.
+                                  # Tightened 18->12 (2026-06-19): a sparse
+                                  # bottle mis-hit can't bridge a >12s gap now,
+                                  # so it no longer sustains a false alert.
+    "phone_crop_confidence": 0.30,  # threshold for the 2x-zoom second pass on
                                   # each person's box. Measured 2026-06-11:
                                   # in-hand phone scores med 0.27 / max 0.76
                                   # at 2x zoom vs med 0.17 on the full frame
@@ -138,10 +171,17 @@ CONFIG = {
     # "therapist beige" covers BOTH the male and female fronts (same tone);
     # calibrated 2026-06-11. Warm hues incl. the red wrap-around; white/gray
     # clothing reads BLUE on these cameras and stays out of range.
+    # Re-calibrated 2026-06-19 from saved staff evidence across all cameras
+    # (calibrate_from_evidence.py): the beige reads with higher saturation
+    # (up to ~175, not 120) and a wider brightness span (~35-230, not 50-200)
+    # than first measured -> staff chest pixels in-range jumped from 35-47% to
+    # 57-68%, so seated/oddly-lit staff stop being misread as customer. Warm
+    # hue bands kept (incl. the red wrap-around); white/gray clothing reads as
+    # blue (H~100-130) and still falls outside.
     "uniform_sets": {
         "therapist beige": [
-            ((0, 8, 50), (40, 120, 200)),
-            ((150, 8, 50), (179, 120, 200)),
+            ((0, 8, 35), (45, 175, 230)),
+            ((150, 8, 35), (179, 175, 230)),
         ],
     },
     "uniform_match_frac": 0.40,   # region counts as uniform above this
