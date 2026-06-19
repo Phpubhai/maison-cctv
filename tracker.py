@@ -64,6 +64,7 @@ class _Tracked:
         self.state = "active"
         self.held = 0.0
         self.last_alert = {}        # event name -> last emit time
+        self.room = None            # last room zone entered (occupancy cams)
 
 
 class TrackManager:
@@ -76,6 +77,20 @@ class TrackManager:
         self.enroller = enroller
         self.watch_only = camera_id in cfg.get("watch_only", [])
         self.presence = camera_id in cfg.get("presence_cameras", [])
+        # no-penalty cameras: still track + label staff/customer (ENTER/LEAVE),
+        # but run NO penalty analysis (sleep/phone/posture). For treatment rooms
+        # where staff legitimately handle tools all shift -> penalties = noise.
+        self.no_penalty = camera_id in cfg.get("no_penalty_cameras", [])
+        # selectively switch OFF individual staff penalties on a camera (e.g.
+        # foot spa: no "sleep"/"phone", but floor-object alerts still run).
+        self.disabled = set(cfg.get("disable_penalties", {}).get(camera_id, []))
+        # room occupancy: doorway zones in one camera (e.g. spa room corridor
+        # with 4 rooms) -> log who enters which room. [{"name","zone"(x1y1x2y2)}]
+        self.room_zones = cfg.get("room_zones", {}).get(camera_id, [])
+        # no-phone cameras: keep every other check (sleep, floor objects...) but
+        # never raise PHONE USE -- treatment rooms where staff hold tools/bottles
+        # all shift make phone detection almost all false positives.
+        self.no_phone = camera_id in cfg.get("no_phone_cameras", [])
         self.ignore_zones = cfg.get("ignore_zones", {}).get(camera_id, [])
         # fixed staff positions (e.g. the reception desk seat): a person whose
         # box center sits here is staff regardless of uniform/face -- rescues
@@ -128,8 +143,9 @@ class TrackManager:
             now, frame, box, pts, kconf, p.posture, head_down, buried)
         label = display_label(p.voter.role, p.voter.name)
         tid = staff_therapist_id(p.voter.name)
+        sleep_on = "sleep" not in self.disabled
 
-        if p.state == "sleeping":
+        if sleep_on and p.state == "sleeping":
             # every NEW sleep episode hits the timeline immediately -- waking
             # up and dozing off again is never suppressed, no matter how soon
             # it repeats. The cooldown only spaces out repeat alerts within
@@ -148,7 +164,7 @@ class TrackManager:
                                 f"{why}, started {_clock(p.sleep_started)} "
                                 f"({int(p.held)}s so far)", "alert",
                                 therapist_id=tid, image_path=img, duration=p.held)
-        elif prev == "sleeping":
+        elif sleep_on and prev == "sleeping":
             # episode over: log how long it lasted in total
             dur = now - (p.sleep_started or now)
             self.logger.log(self.camera_id, label, "SLEEPING END",
@@ -156,7 +172,7 @@ class TrackManager:
                             f"({_clock(p.sleep_started)} - {_clock(now)})", "normal",
                             therapist_id=tid, duration=dur)
             p.sleep_started = None
-        elif p.state == "drowsy" and prev == "active":
+        elif sleep_on and p.state == "drowsy" and prev == "active":
             if self._cooldown_ok(p, "DROWSY", now):
                 self.logger.log(self.camera_id, label, "DROWSY",
                                 f"{why}, started {_clock(now - p.held)} "
@@ -166,24 +182,26 @@ class TrackManager:
         # phone: timer runs only while THIS person is the one holding a
         # phone (nearest-wrist ownership, resolved in _phone_holders --
         # working right next to a customer's phone no longer counts)
-        if holds_phone:
-            p.phone_seen = now
-        # detection flickers frame to frame; the timer survives short gaps
-        near = p.phone_seen is not None and now - p.phone_seen <= self.cfg["phone_grace"]
-        if near:
-            p.phone_since = p.phone_since or now
-        else:
-            self._end_phone(p, label)
-        if (p.phone_since and now - p.phone_since >= self.cfg["phone_secs"]
-                and self._cooldown_ok(p, "PHONE USE", now)):
-            img = self.logger.save_evidence(frame, box, self.camera_id, label,
-                                            "PHONE USE", duration=now - p.phone_since,
-                                            started=p.phone_since)
-            self.logger.log(self.camera_id, label, "PHONE USE",
-                            f"phone in hand, started {_clock(p.phone_since)} "
-                            f"({int(now - p.phone_since)}s so far)", "alert",
-                            therapist_id=tid, image_path=img, duration=now - p.phone_since)
-            p.phone_announced = True
+        if "phone" not in self.disabled:
+            if holds_phone:
+                p.phone_seen = now
+            # detection flickers frame to frame; the timer survives short gaps
+            near = p.phone_seen is not None and now - p.phone_seen <= self.cfg["phone_grace"]
+            if near:
+                p.phone_since = p.phone_since or now
+            else:
+                self._end_phone(p, label)
+            if (p.phone_since and now - p.phone_since >= self.cfg["phone_secs"]
+                    and self._cooldown_ok(p, "PHONE USE", now)):
+                img = self.logger.save_evidence(frame, box, self.camera_id, label,
+                                                "PHONE USE", duration=now - p.phone_since,
+                                                started=p.phone_since)
+                self.logger.log(self.camera_id, label, "PHONE USE",
+                                f"phone in hand, started {_clock(p.phone_since)} "
+                                f"({int(now - p.phone_since)}s so far)", "alert",
+                                therapist_id=tid, image_path=img,
+                                duration=now - p.phone_since)
+                p.phone_announced = True
 
     def _end_phone(self, p, label):
         """Close an announced phone episode with its total duration. Duration
@@ -242,6 +260,19 @@ class TrackManager:
         """True when the box center sits inside a fixed staff position."""
         return bool(self.staff_zones) and self._center_in(
             box, frame_shape, self.staff_zones)
+
+    def _which_room(self, box, frame_shape):
+        """Name of the room-zone the box center sits in, or None (corridor)."""
+        if not self.room_zones:
+            return None
+        h, w = frame_shape[:2]
+        cx = (box[0] + box[2]) / 2 / w
+        cy = (box[1] + box[3]) / 2 / h
+        for r in self.room_zones:
+            x1, y1, x2, y2 = r["zone"]
+            if x1 <= cx <= x2 and y1 <= cy <= y2:
+                return r["name"]
+        return None
 
     def _in_rest_zone(self, box, frame_shape):
         """True when the box center is in the staff rest zone (break room):
@@ -417,15 +448,29 @@ class TrackManager:
                 # is why standing posture cancels it
                 buried = face_hidden(kconf) and p.posture != "standing"
 
-                if resting:
-                    p.state = "active"    # break room: staff, but no penalties
+                if resting or self.no_penalty:
+                    p.state = "active"    # break room / no-penalty cam: no alerts
                 elif role == "staff":
                     self._analyze_staff(p, now, frame, box, pts, kconf,
-                                        head_down, buried, tid in holders)
+                                        head_down, buried,
+                                        (tid in holders) and not self.no_phone)
                 elif role == "customer":
                     self._analyze_customer(p, now, frame, box, pts, kconf)
                 else:
                     p.state = "active"
+
+            # room occupancy (e.g. the spa corridor with 4 rooms): log who
+            # enters which room when their center crosses into a doorway zone.
+            # p.room holds the LAST room so corridor<->doorway jitter doesn't
+            # re-fire; only a DIFFERENT room emits again.
+            if self.room_zones and p.announced:
+                room = self._which_room(box, frame.shape)
+                if room and room != p.room:
+                    self.logger.log(self.camera_id,
+                                    display_label(p.voter.role, p.voter.name),
+                                    "ROOM ENTER", f"entered {room}", "normal",
+                                    therapist_id=staff_therapist_id(p.voter.name))
+                    p.room = room
 
             # --- display strings ------------------------------------------
             label = display_label(p.voter.role, p.voter.name)

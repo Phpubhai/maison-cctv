@@ -36,13 +36,22 @@ CONFIG = {
     # number -- all rules below are keyed by NAME, so only this mapping moves.
     "nvr_url": NVR_URL,   # real value from local_settings.py (gitignored)
     "cameras": [
-        ("front door", 3),    # cashier desk + pedicure chairs, 1280x720
-        ("reception", 1),     # lounge, 1920x1080
-        ("foot spa", 2),      # foot-spa corridor, 2304x1296
-        ("office", 4),        # back office / workshop, 1920x1080 (watch-only)
-        ("street", 5),        # outdoor, in front of the shop, 1280x720
-        ("makeup room", 6),   # NOT on the NVR right now -> shows offline.
-                              # Update this channel when the camera returns.
+        # Channel map RE-VERIFIED 2026-06-19 (Mercusys app + nvr_probe): the NVR
+        # now exposes 8 channels and the rooms MOVED. Keyed by ROOM SHOWN, so
+        # only this mapping changes. ch1/2/3 confirmed from live frames.
+        ("reception", 1),     # lounge (sofa + glass tables), 1920x1080
+        ("front door", 2),    # cashier desk + pedicure chairs, 1280x720
+        ("office", 3),        # back office / workshop, 1920x1080 (presence)
+        ("street", 4),        # outdoor in front of the shop -- watch-only (PDPA)
+        ("foot spa", 5),      # foot spa room (cam 192.168.1.15) -- pulls OK
+        ("2nd floor", 6),     # upstairs (cam 192.168.1.13) -- RTSP won't pull
+                              # from the PC though the NVR/app show it fine:
+                              # the camera is almost certainly encoding H.265,
+                              # which OpenCV/FFmpeg can't decode here. FIX: set
+                              # this camera to H.264 in its video settings.
+        ("spa room", 8),      # spa corridor, 4 rooms (cam 192.168.1.11) -- OK
+        # ch7 is NOT connected yet -> add when it comes online.
+        # ("makeup room") no longer exists.
     ],
     # watch-only cameras: live view with plain person boxes, NOTHING else --
     # no role classification, no sleep/phone/posture analysis, no timeline
@@ -88,6 +97,36 @@ CONFIG = {
     # here) but NO penalty analysis runs. For back rooms where normal staff
     # behavior (phone, resting) is not a violation.
     "presence_cameras": ["office"],
+
+    # no-penalty cameras: track + label people, but NO penalty analysis. The
+    # newly added rooms (2026-06-19) -- treatment rooms / spaces we watch but
+    # don't police for staff behavior. Add a room here to silence its penalties.
+    "no_penalty_cameras": ["2nd floor", "spa room"],
+
+    # selectively switch OFF individual staff penalties per camera (the rest
+    # still run). foot spa is a treatment room: no sleep/phone alerts (staff
+    # handle tools all shift), but floor-object alerts (uncleared items) stay on.
+    "disable_penalties": {
+        "foot spa": ["sleep", "phone"],
+    },
+
+    # room occupancy: doorway zones within one camera -> log who enters which
+    # room. spa room is a corridor with 4 treatment rooms (MAISON 1-4). Zones
+    # from a colour-marked frame 2026-06-19; (x1,y1,x2,y2) fractions. ESTIMATES
+    # -- verify against live tracking and nudge if entries fire early/late.
+    "room_zones": {
+        "spa room": [
+            {"name": "Room 1", "zone": (0.63, 0.06, 0.82, 0.90)},   # green, right (MAISON 1)
+            {"name": "Room 2", "zone": (0.56, 0.06, 0.63, 0.62)},   # yellow, centre-right
+            {"name": "Room 3", "zone": (0.23, 0.01, 0.36, 0.94)},   # red, left (MAISON 3)
+            {"name": "Room 4", "zone": (0.36, 0.01, 0.41, 0.73)},   # orange, centre-left
+        ],
+    },
+
+    # no-phone cameras: keep other penalties (sleep, floor objects) but never
+    # raise PHONE USE. foot spa: staff hold tools/oil bottles all shift, so
+    # phone detection there is almost all false positives.
+    "no_phone_cameras": ["foot spa"],
 
     # --- detection ------------------------------------------------------
     # same model family/sizes as behavior_monitor_v2: yolo11, big on GPU

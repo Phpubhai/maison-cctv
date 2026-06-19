@@ -86,6 +86,8 @@ class TimelineLogger:
         """Which events reach the POS timeline. Same base subset as the store
         (penalties + customer + warning/alert), except customer ENTER/LEAVE,
         which only counts as a shop arrival at the entrance camera(s)."""
+        if event == "ROOM ENTER":
+            return True   # service tracking: always push room occupancy
         if not is_pushable(event, severity, actor_type):
             return False
         if actor_type == "customer" and event in ("ENTER", "LEAVE"):
