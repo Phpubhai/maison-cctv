@@ -200,23 +200,33 @@ CONFIG = {
     "faces_dir": os.path.join(os.path.dirname(os.path.abspath(__file__)), "faces"),
     "staff_registry": os.path.join(_HERE, "staff.json"),  # face id -> real
                                   # name + POS therapist_id (hand-editable)
-    "face_match_cosine": 0.50,    # SFace cosine similarity for a match.
-                                  # The textbook value is 0.363, but at CCTV
-                                  # resolution a DIFFERENT person measured
-                                  # 0.448 against staff_01 (2026-06-11), while
-                                  # true matches measured 0.575+ -- 0.50 keeps
-                                  # real matches and blocks the look-alikes.
+    "face_match_cosine": 0.62,    # SFace cosine similarity for a match.
+                                  # Raised 0.50 -> 0.62 on 2026-06-19 after
+                                  # face_calibrate.py showed faces are NOT
+                                  # reliably separable on these cameras: same-
+                                  # person median 0.21 vs different-person
+                                  # median 0.44 (overlapping/inverted). 0.62
+                                  # only assigns a name on a near-certain match
+                                  # (rare but right); everyone else stays
+                                  # "STAFF". Identity now leans on uniform +
+                                  # staff/rest zones, not faces.
     "face_check_every": 3.0,      # seconds between face checks per person
-    "face_match_margin": 0.10,    # 1:N: the best match must beat the 2nd-best
+    "face_match_margin": 0.12,    # 1:N: the best match must beat the 2nd-best
                                   # person by this much, else "not sure" (None).
                                   # Stops a marginal wrong match from winning.
+                                  # 0.10 -> 0.12 (2026-06-19) given how noisy
+                                  # cross-person scores are on these cameras.
 
     # --- auto-enrollment from staff-only (presence) rooms --------------------
     # everyone in a presence room is staff, so their face can be auto-added to
     # the registry for recognition in OTHER rooms. Heavily gated: only sharp
     # frontal faces, several consistent samples, and never a face that already
     # matches an enrolled person.
-    "auto_enroll": True,
+    "auto_enroll": False,         # disabled 2026-06-19: CCTV faces aren't
+                                  # separable (see face_match_cosine), so auto-
+                                  # enrollment just bred duplicate ids (19 for
+                                  # ~5 real people). Enroll deliberately /
+                                  # name via staff.json + staff_zones instead.
     "enroll_min_score": 0.85,     # YuNet detection score (frontal-ish) to keep
     "enroll_min_face": 60,        # min face size in px on the 2x crop
     "enroll_samples": 6,          # consistent samples before enrolling a person
