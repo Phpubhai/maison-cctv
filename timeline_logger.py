@@ -95,7 +95,7 @@ class TimelineLogger:
         return True
 
     def log(self, camera_id, label, event, description, severity,
-            therapist_id=None, image_path=None, duration=None):
+            therapist_id=None, image_path=None, duration=None, room=None):
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
         actor_type, actor_name = _split_actor(label)
         entry = {
@@ -122,6 +122,8 @@ class TimelineLogger:
             who = actor_name or {"customer": "ลูกค้า", "staff": "STAFF"}.get(actor_type)
             meta = {"severity": severity, "description": description,
                     "therapist_id": therapist_id}
+            if room:
+                meta["room"] = room          # structured room id for the POS
             # snapshot stays local; send a URL the POS can open (served by the
             # event server's /snapshot route, key-protected, LAN only)
             if image_path:
