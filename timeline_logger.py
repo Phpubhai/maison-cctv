@@ -24,6 +24,20 @@ except ImportError:  # package missing -> file logging still works
     serve = None
 
 
+# Ongoing-condition events that open an incident on START and close it on END.
+# The POS timeline gets one START (first alert) + one END (with total duration);
+# the periodic re-alerts in between are not pushed. END events are force-pushed
+# (they are logged "normal", which is_pushable would otherwise reject).
+END_OF = {
+    "SLEEPING END": "SLEEPING",
+    "PHONE USE END": "PHONE USE",
+    "ROOM TIDY": "ROOM MESSY",
+    "FLOOR CLEARED": "OBJECT ON FLOOR",
+    "TABLE CLEARED": "UNCLEARED TABLE",
+}
+START_EVENTS = set(END_OF.values())   # only these alerts are collapsed
+
+
 # map the on-screen label to a structured (actor_type, actor_name) for the DB.
 # "STAFF:Phai" -> ("staff","Phai"); "STAFF" -> ("staff",None);
 # "customer" -> ("customer",None); "?" -> ("unknown",None)
@@ -75,6 +89,8 @@ class TimelineLogger:
         self.pusher = event_pusher.maybe_start(cfg)
         # customer enter/leave only counts as a shop arrival at the entrance
         self.customer_flow_cameras = cfg.get("customer_flow_cameras") or []
+        # open incidents -> {(camera_id, who, start_event)}; collapses re-alerts
+        self._open_incidents = set()
         if serve is None:
             print("websockets not installed -> events.jsonl only, no broadcast", flush=True)
         else:
@@ -82,22 +98,39 @@ class TimelineLogger:
                              args=(cfg["ws_host"], cfg["ws_port"]), daemon=True).start()
 
     # --- public API -------------------------------------------------------
-    def _should_push(self, camera_id, event, severity, actor_type):
-        """Which events reach the POS timeline. Same base subset as the store
-        (penalties + customer + warning/alert), except customer ENTER/LEAVE,
-        which only counts as a shop arrival at the entrance camera(s)."""
+    def _should_push(self, camera_id, event, severity, actor_type, who):
+        """Which events reach the POS timeline, collapsing re-alerts.
+
+        An ongoing condition pushes ONE START (first alert) and ONE END (its
+        close event, force-pushed with the total duration); the periodic
+        re-alerts in between are suppressed. Everything else uses the base
+        subset (penalties + customer + warning/alert), with customer
+        ENTER/LEAVE counting only at the entrance camera(s)."""
+        # END of an ongoing condition: close the incident, always push (closure)
+        if event in END_OF:
+            self._open_incidents.discard((camera_id, who, END_OF[event]))
+            return True
         if event == "ROOM ENTER":
             return True   # service tracking: always push room occupancy
         if not is_pushable(event, severity, actor_type):
             return False
         if actor_type == "customer" and event in ("ENTER", "LEAVE"):
             return camera_id in self.customer_flow_cameras
+        # ongoing-condition START: push the first, suppress repeats until END
+        if event in START_EVENTS and severity in ("warning", "alert"):
+            key = (camera_id, who, event)
+            if key in self._open_incidents:
+                return False           # re-alert of an already-open incident
+            self._open_incidents.add(key)
+            return True
         return True
 
     def log(self, camera_id, label, event, description, severity,
             therapist_id=None, image_path=None, duration=None, room=None):
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
         actor_type, actor_name = _split_actor(label)
+        who = actor_name or {"customer": "ลูกค้า", "staff": "STAFF"}.get(actor_type)
+        push_it = self._should_push(camera_id, event, severity, actor_type, who)
         entry = {
             "timestamp": ts,
             "camera_id": camera_id,
@@ -112,14 +145,13 @@ class TimelineLogger:
         if self.store is not None:
             try:
                 self.store.add(ts, camera_id, actor_type, actor_name,
-                               therapist_id, event, description, severity, image_path)
+                               therapist_id, event, description, severity,
+                               image_path, pushed=(0 if push_it else 1))
             except Exception as e:
                 print(f"event store write failed: {e}", flush=True)
         # realtime push to the POS timeline: same subset the store marks
         # pushable (penalties + customer events). who = name, else role.
-        if self.pusher is not None and self._should_push(camera_id, event,
-                                                         severity, actor_type):
-            who = actor_name or {"customer": "ลูกค้า", "staff": "STAFF"}.get(actor_type)
+        if self.pusher is not None and push_it:
             meta = {"severity": severity, "description": description,
                     "therapist_id": therapist_id}
             if room:
