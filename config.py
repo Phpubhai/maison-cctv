@@ -35,23 +35,19 @@ CONFIG = {
     # reshuffled every channel. Match by the room shown, not the channel
     # number -- all rules below are keyed by NAME, so only this mapping moves.
     "nvr_url": NVR_URL,   # real value from local_settings.py (gitignored)
+    # Camera table (2026-06-22): per-camera flags so we analyse only what
+    # matters and can re-enable the rest by flipping `active`. `stream` is
+    # "main" (full res) or "sub" (NVR substream, lighter/faster). Per-room
+    # rules elsewhere are keyed by `name`; an inactive camera's rules are
+    # simply inert until it is re-activated. Channel map re-verified 2026-06-22.
     "cameras": [
-        # Channel map RE-VERIFIED 2026-06-19 (Mercusys app + nvr_probe): the NVR
-        # now exposes 8 channels and the rooms MOVED. Keyed by ROOM SHOWN, so
-        # only this mapping changes. ch1/2/3 confirmed from live frames.
-        ("reception", 1),     # lounge (sofa + glass tables), 1920x1080
-        ("front door", 2),    # cashier desk + pedicure chairs, 1280x720
-        ("office", 3),        # back office / workshop, 1920x1080 (presence)
-        ("street", 4),        # outdoor in front of the shop -- watch-only (PDPA)
-        ("foot spa", 5),      # foot spa room (cam 192.168.1.15) -- pulls OK
-        ("2nd floor", 6),     # upstairs (cam 192.168.1.13) -- RTSP won't pull
-                              # from the PC though the NVR/app show it fine:
-                              # the camera is almost certainly encoding H.265,
-                              # which OpenCV/FFmpeg can't decode here. FIX: set
-                              # this camera to H.264 in its video settings.
-        ("spa room", 8),      # spa corridor, 4 rooms (cam 192.168.1.11) -- OK
-        # ch7 is NOT connected yet -> add when it comes online.
-        # ("makeup room") no longer exists.
+        {"name": "reception",  "ch": 1, "active": True,  "stream": "main"},
+        {"name": "front door", "ch": 2, "active": True,  "stream": "main"},
+        {"name": "foot spa",   "ch": 5, "active": True,  "stream": "main"},
+        {"name": "spa room",   "ch": 8, "active": True,  "stream": "main"},
+        {"name": "office",     "ch": 3, "active": False, "stream": "main"},
+        {"name": "street",     "ch": 4, "active": False, "stream": "main"},
+        {"name": "2nd floor",  "ch": 6, "active": False, "stream": "sub"},
     ],
     # watch-only cameras: live view with plain person boxes, NOTHING else --
     # no role classification, no sleep/phone/posture analysis, no timeline

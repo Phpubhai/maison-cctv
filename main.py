@@ -110,11 +110,20 @@ def offline_tile(camera_id, w):
     return tile
 
 
+def _camera_url(cam):
+    """RTSP URL for one camera-table row; substream rows get the NVR's
+    low-res second stream (&stream=1)."""
+    url = CONFIG["nvr_url"].format(ch=cam["ch"])
+    if cam.get("stream") == "sub":
+        url += "&stream=1"
+    return url
+
+
 def default_sources():
-    """(name, RTSP URL) per camera -- every stream comes from the NVR server
-    (one box fans out all channels), no direct camera connections anymore."""
-    return [(name, CONFIG["nvr_url"].format(ch=ch))
-            for name, ch in CONFIG["cameras"]]
+    """(name, RTSP URL) for the ACTIVE cameras only -- inactive rows are not
+    pulled or analysed. Streams come from the NVR (one box, one channel each)."""
+    return [(c["name"], _camera_url(c))
+            for c in CONFIG["cameras"] if c.get("active", True)]
 
 
 def main(sources):
