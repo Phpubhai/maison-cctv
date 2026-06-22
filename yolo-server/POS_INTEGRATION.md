@@ -173,3 +173,25 @@ es.onmessage = (m) => pushToPosClients(JSON.parse(m.data));
   build pushes the START + periodic re-alerts with "so far" duration.
 - Thai vs English `label` text — currently English codes (see table); can be
   localized server-side or by the POS.
+
+## ROOM ENTER (spa treatment rooms)
+
+The spa-room corridor camera emits `label: "ROOM ENTER"` when someone goes into
+a treatment-room doorway. The room is in `meta.room`, named to match bookings:
+
+```json
+{
+  "ts": "2026-06-22 14:00:00",
+  "camera_id": "spa room",
+  "label": "ROOM ENTER",
+  "actor": "STAFF",
+  "meta": { "room": "MAISON 1", "description": "entered MAISON 1", "severity": "normal" }
+}
+```
+
+- `meta.room` is one of **MAISON 1 / MAISON 2 / MAISON 3 / MAISON 4**.
+- **ENTER only** — the camera can't see inside the rooms, so it does NOT send
+  exit or duration. Derive session start/length by matching `meta.room` + `ts`
+  to your bookings.
+- `actor` is a best-effort hint (uniform-based, no reliable face ID). Use the
+  booking for authoritative identity; treat `meta.room` + `ts` as the keys.
