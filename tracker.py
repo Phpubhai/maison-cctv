@@ -469,7 +469,8 @@ class TrackManager:
                     self.logger.log(self.camera_id,
                                     display_label(p.voter.role, p.voter.name),
                                     "ROOM ENTER", f"entered {room}", "normal",
-                                    therapist_id=staff_therapist_id(p.voter.name))
+                                    therapist_id=staff_therapist_id(p.voter.name),
+                                    room=room)
                     p.room = room
 
             # --- display strings ------------------------------------------

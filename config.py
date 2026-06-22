@@ -117,10 +117,10 @@ CONFIG = {
     # -- verify against live tracking and nudge if entries fire early/late.
     "room_zones": {
         "spa room": [
-            {"name": "Room 1", "zone": (0.63, 0.06, 0.82, 0.90)},   # green, right (MAISON 1)
-            {"name": "Room 2", "zone": (0.56, 0.06, 0.63, 0.62)},   # yellow, centre-right
-            {"name": "Room 3", "zone": (0.23, 0.01, 0.36, 0.94)},   # red, left (MAISON 3)
-            {"name": "Room 4", "zone": (0.36, 0.01, 0.41, 0.73)},   # orange, centre-left
+            {"name": "MAISON 1", "zone": (0.63, 0.06, 0.82, 0.90)},   # green, right
+            {"name": "MAISON 2", "zone": (0.56, 0.06, 0.63, 0.62)},   # yellow, centre-right
+            {"name": "MAISON 3", "zone": (0.23, 0.01, 0.36, 0.94)},   # red, left
+            {"name": "MAISON 4", "zone": (0.36, 0.01, 0.41, 0.73)},   # orange, centre-left
         ],
     },
 
