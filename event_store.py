@@ -27,6 +27,21 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_name);
 CREATE INDEX IF NOT EXISTS idx_events_pushed ON events(pushed);
+CREATE TABLE IF NOT EXISTS presence_intervals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  therapist    TEXT,
+  therapist_id TEXT,
+  room         TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  confidence   REAL,
+  source       TEXT,
+  camera       TEXT,
+  pushed       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pres_pushed ON presence_intervals(pushed);
+CREATE INDEX IF NOT EXISTS idx_pres_open ON presence_intervals(ended_at);
 """
 
 # events that belong on the POS timeline: staff penalties + anything about a
@@ -98,6 +113,51 @@ class EventStore:
             self.conn.executemany("UPDATE events SET pushed=1 WHERE id=?",
                                   [(i,) for i in ids])
             self.conn.commit()
+
+    # --- presence intervals (the room×time timeline) ----------------------
+    def open_interval(self, ts, camera, therapist, therapist_id, room, status,
+                      confidence=None, source=None):
+        """Start a presence interval (ended_at NULL). Born pushed=0."""
+        with self.lock:
+            cur = self.conn.execute(
+                "INSERT INTO presence_intervals (therapist,therapist_id,room,"
+                "status,started_at,ended_at,confidence,source,camera,pushed) "
+                "VALUES (?,?,?,?,?,NULL,?,?,?,0)",
+                (therapist, therapist_id, room, status, ts, confidence,
+                 source, camera))
+            self.conn.commit()
+            return cur.lastrowid
+
+    def close_interval(self, interval_id, ts):
+        """Stamp ended_at and re-flag pushed=0 so the closed row (now with a
+        duration) is re-pushed; doc id = interval id keeps the POS idempotent."""
+        with self.lock:
+            self.conn.execute(
+                "UPDATE presence_intervals SET ended_at=?, pushed=0 WHERE id=?",
+                (ts, interval_id))
+            self.conn.commit()
+
+    def fetch_unpushed_presence(self, limit=50):
+        with self.lock:
+            return self.conn.execute(
+                "SELECT * FROM presence_intervals WHERE pushed=0 "
+                "ORDER BY id LIMIT ?", (limit,)).fetchall()
+
+    def mark_presence_pushed(self, ids):
+        if not ids:
+            return
+        with self.lock:
+            self.conn.executemany(
+                "UPDATE presence_intervals SET pushed=1 WHERE id=?",
+                [(i,) for i in ids])
+            self.conn.commit()
+
+    def open_presence(self):
+        """Currently-open intervals (the live 'now' set)."""
+        with self.lock:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT * FROM presence_intervals WHERE ended_at IS NULL "
+                "ORDER BY id").fetchall()]
 
     def query(self, actor=None, since=None, severity=None, limit=200):
         """Read the timeline (for local viewing / reports). Filters optional."""
