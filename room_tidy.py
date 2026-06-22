@@ -85,11 +85,13 @@ class TidyMonitor:
             held = now - self.messy_since
             if (held >= self.cfg["tidy_messy_secs"]
                     and now - self.last_alert >= self.cfg["re_alert_secs"]):
+                first = not self.alerted
                 self.last_alert = now
                 self.alerted = True
-                img = self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
-                                                "ROOM MESSY", duration=held,
-                                                started=self.messy_since)
+                img = (self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
+                                                 "ROOM MESSY", duration=held,
+                                                 started=self.messy_since)
+                       if first else None)
                 self.logger.log(self.camera_id, "STAFF", "ROOM MESSY",
                                 f"room differs from the tidy reference "
                                 f"({frac:.0%} of view) since {_clock(self.messy_since)} "

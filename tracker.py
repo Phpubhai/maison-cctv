@@ -157,9 +157,10 @@ class TrackManager:
             else:
                 emit = self._cooldown_ok(p, "SLEEPING", now)
             if emit:
-                img = self.logger.save_evidence(frame, box, self.camera_id, label,
-                                                "SLEEPING", duration=p.held,
-                                                started=p.sleep_started)
+                img = (self.logger.save_evidence(frame, box, self.camera_id, label,
+                                                 "SLEEPING", duration=p.held,
+                                                 started=p.sleep_started)
+                       if prev != "sleeping" else None)
                 self.logger.log(self.camera_id, label, "SLEEPING",
                                 f"{why}, started {_clock(p.sleep_started)} "
                                 f"({int(p.held)}s so far)", "alert",
@@ -193,9 +194,11 @@ class TrackManager:
                 self._end_phone(p, label)
             if (p.phone_since and now - p.phone_since >= self.cfg["phone_secs"]
                     and self._cooldown_ok(p, "PHONE USE", now)):
-                img = self.logger.save_evidence(frame, box, self.camera_id, label,
-                                                "PHONE USE", duration=now - p.phone_since,
-                                                started=p.phone_since)
+                first = not p.phone_announced
+                img = (self.logger.save_evidence(frame, box, self.camera_id, label,
+                                                 "PHONE USE", duration=now - p.phone_since,
+                                                 started=p.phone_since)
+                       if first else None)
                 self.logger.log(self.camera_id, label, "PHONE USE",
                                 f"phone in hand, started {_clock(p.phone_since)} "
                                 f"({int(now - p.phone_since)}s so far)", "alert",
