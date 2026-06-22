@@ -52,12 +52,17 @@ class EventStore:
             self.conn.commit()
 
     def add(self, ts, camera, actor_type, actor_name, therapist_id,
-            event, description, severity, image_path=None):
+            event, description, severity, image_path=None, pushed=None):
         """Insert one event; returns its row id. Rows that don't belong on
         the POS timeline are born pushed=1 ("no push needed") so the push
         queue only ever holds pushable rows -- otherwise ENTER/LEAVE pile up
-        as pushed=0 and starve the worker's LIMIT window."""
-        pushed = 0 if is_pushable(event, severity, actor_type) else 1
+        as pushed=0 and starve the worker's LIMIT window.
+
+        `pushed` lets the caller (TimelineLogger, which holds incident state)
+        override the row's push flag directly -- 0 = needs pushing, 1 = skip.
+        When None, fall back to the stateless is_pushable rule (unchanged)."""
+        if pushed is None:
+            pushed = 0 if is_pushable(event, severity, actor_type) else 1
         with self.lock:
             cur = self.conn.execute(
                 "INSERT INTO events (ts,camera,actor_type,actor_name,"
@@ -75,13 +80,16 @@ class EventStore:
             self.conn.commit()
 
     def fetch_unpushed(self, limit=50):
-        """Pushable rows not yet sent to the POS, oldest first."""
+        """Rows not yet sent to the POS, oldest first. The `pushed` column is
+        the single source of truth (stamped at insert from is_pushable, or set
+        explicitly by the caller for collapsed/force-pushed events), so there
+        is no second is_pushable filter here -- that would discard rows a
+        caller deliberately flagged pushed=0 (e.g. a force-pushed END)."""
         with self.lock:
             rows = self.conn.execute(
                 "SELECT * FROM events WHERE pushed=0 ORDER BY id LIMIT ?",
                 (limit,)).fetchall()
-        return [r for r in rows
-                if is_pushable(r["event"], r["severity"], r["actor_type"])]
+        return rows
 
     def mark_pushed(self, ids):
         if not ids:
