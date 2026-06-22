@@ -41,13 +41,18 @@ CONFIG = {
     # rules elsewhere are keyed by `name`; an inactive camera's rules are
     # simply inert until it is re-activated. Channel map re-verified 2026-06-22.
     "cameras": [
-        {"name": "reception",  "ch": 1, "active": True,  "stream": "main"},
+        # Channels RE-VERIFIED from live frames after an NVR reboot 2026-06-22.
+        # The NVR reshuffles channels on reboot -- pin camera->channel in the
+        # NVR settings to stop this. street (ch5) only pulls on the substream
+        # (its mainstream stalls); 2nd floor (ch7) connects on either but uses
+        # sub to lighten NVR load (it's a no-penalty camera). ch1 is dead/empty.
+        {"name": "reception",  "ch": 4, "active": True,  "stream": "main"},
         {"name": "front door", "ch": 2, "active": True,  "stream": "main"},
-        {"name": "foot spa",   "ch": 5, "active": True,  "stream": "main"},
+        {"name": "office",     "ch": 3, "active": True,  "stream": "main"},
+        {"name": "foot spa",   "ch": 6, "active": True,  "stream": "main"},
         {"name": "spa room",   "ch": 8, "active": True,  "stream": "main"},
-        {"name": "office",     "ch": 3, "active": False, "stream": "main"},
-        {"name": "street",     "ch": 4, "active": False, "stream": "main"},
-        {"name": "2nd floor",  "ch": 6, "active": False, "stream": "sub"},
+        {"name": "street",     "ch": 5, "active": True,  "stream": "sub"},
+        {"name": "2nd floor",  "ch": 7, "active": True,  "stream": "sub"},
     ],
     # watch-only cameras: live view with plain person boxes, NOTHING else --
     # no role classification, no sleep/phone/posture analysis, no timeline
