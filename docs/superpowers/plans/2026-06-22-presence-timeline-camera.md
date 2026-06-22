@@ -1133,12 +1133,13 @@ read; only the Cloud Function (admin) writes. **Retention:** scheduled delete of
 docs whose `endedAt` is older than N days (e.g. 90); the camera keeps full
 history locally.
 
-## 3. POS UI (Plan 3 — see design §8)
-- **หน้า "ตอนนี้":** `onSnapshot(presence where endedAt == null)` → room cards
-  with DaisyUI avatar group + status badge. Tap avatar → correction (needs the
-  `corrections/` channel, Plan 2).
-- **หน้า "ไทม์ไลน์":** query a day range → Gantt (rooms × time) with status
-  colors + avatar chips.
+## 3. POS UI (Plan 3 — Nuxt.js + Pinia + DaisyUI; see design §8)
+- Pinia store `usePresenceStore` subscribes `onSnapshot(presence where
+  endedAt == null)` once; both pages read from it.
+- **หน้า "ตอนนี้":** room cards (DaisyUI avatar group + status badge), grouped
+  by room. Tap avatar → correction (needs the `corrections/` channel, Plan 2).
+- **หน้า "ไทม์ไลน์":** store action queries a day range → Gantt (rooms × time)
+  with status colors + avatar chips.
 
 ## 4. Test independently (no camera)
 1. `curl` with a fake interval (good key → 200 + doc; same `id` again with
@@ -1207,6 +1208,7 @@ and the contract (Task 6); `observe(...)` kwargs match between Task 3, Task 4
   supervised "teach who is who" tool capturing snapshots at the anchor camera
   (replacing the disabled `auto_enroll`); and the `corrections/` poll loop. It
   plugs into `_presence_observe` as the identity source — no engine change.
-- **Plan 3 — POS pages (maisonPOS repo, Vue/DaisyUI + Cloud Function).**
-  Implement `cctvPresence` per `contracts/cctv-presence.v1.md`, the `presence/`
-  rules + retention, and the two pages (`ตอนนี้` board + `ไทม์ไลน์` Gantt).
+- **Plan 3 — POS pages (maisonPOS repo, Nuxt.js + Pinia + DaisyUI + Cloud
+  Function).** Implement `cctvPresence` per `contracts/cctv-presence.v1.md`, the
+  `presence/` rules + retention, a Pinia store `usePresenceStore`, and the two
+  pages (`ตอนนี้` board + `ไทม์ไลน์` Gantt).

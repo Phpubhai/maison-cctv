@@ -216,9 +216,15 @@ startedAt(ISO+07) · endedAt(null) · confidence · camera · receivedAt
 
 ---
 
-## 8. หน้าจอ POS (DaisyUI / Vue)
+## 8. หน้าจอ POS (Nuxt.js + Pinia + DaisyUI)
 
 ใช้ข้อมูลชุดเดียวกัน (`presence`) ต่างกันที่มุมมอง. แท็บ `ตอนนี้` / `ไทม์ไลน์`.
+
+**State/data layer (Nuxt 3 + Pinia):** Pinia store `usePresenceStore` ถือ state
+สด — subscribe Firestore `onSnapshot(presence where endedAt == null)` ครั้งเดียว
+แล้ว derive ทั้ง "ตอนนี้" (group by room) และ feed "ไทม์ไลน์" (query ช่วงวัน
+แยก action). ทั้ง 2 หน้าเป็น component ที่อ่านจาก store เดียวกัน (ไม่ subscribe ซ้ำ).
+DaisyUI ใช้ทำ avatar group / badge / tabs.
 
 ### 8.1 หน้า "ตอนนี้" (บอร์ดสด)
 - grid การ์ดต่อห้อง (`auto-fit`). แต่ละการ์ด: ชื่อห้อง + badge สถานะ + **DaisyUI
@@ -264,9 +270,10 @@ startedAt(ISO+07) · endedAt(null) · confidence · camera · receivedAt
 | `person_labeler.py` | reuse; resolver เรียกใช้ |
 | `contracts/cctv-presence.v1.md` *(ใหม่)* | สัญญา endpoint/collection |
 
-**ฝั่ง POS (maisonPOS):** `functions/src/cctvPresence.ts`, `presence/` rules +
-retention, `corrections/` (read by camera), `usesPresence` composable, หน้า
-`ตอนนี้` + `ไทม์ไลน์`.
+**ฝั่ง POS (maisonPOS — Nuxt.js + Pinia):** `functions/src/cctvPresence.ts`,
+`presence/` rules + retention, `corrections/` (read by camera), Pinia store
+`stores/presence.ts` (`usePresenceStore`), หน้า `pages/presence/index.vue`
+(ตอนนี้) + `pages/presence/timeline.vue` (ไทม์ไลน์).
 
 ---
 
