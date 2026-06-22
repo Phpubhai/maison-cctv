@@ -87,6 +87,26 @@ def _image_url(base, image_path, cfg):
     return f"{base}/{rel}"
 
 
+def _iso7(s):
+    """'YYYY-MM-DD HH:MM:SS' (shop local) -> ISO-8601 +07:00."""
+    return s.replace(" ", "T") + "+07:00" if s else None
+
+
+def presence_payload(r):
+    """Map a presence_intervals row to the /cctvPresence request body."""
+    return {
+        "id": r["id"],
+        "therapist": r["therapist"],
+        "therapistId": r["therapist_id"],
+        "room": r["room"],
+        "status": r["status"],
+        "startedAt": _iso7(r["started_at"]),
+        "endedAt": _iso7(r["ended_at"]),
+        "confidence": r["confidence"],
+        "camera": r["camera"],
+    }
+
+
 # ── push worker ────────────────────────────────────────────────────────────
 class PushWorker(threading.Thread):
     """Polls the store for unpushed penalty/customer rows and POSTs them to
@@ -105,6 +125,8 @@ class PushWorker(threading.Thread):
         # base_url + key from the pos_api block (shared with arrival pushing)
         api = cfg.get("pos_api", {})
         self.url = (api.get("base_url", "").rstrip("/") + "/cctvTimeline") if api.get("base_url") else None
+        self.presence_url = (api.get("base_url", "").rstrip("/") + "/cctvPresence"
+                             if api.get("base_url") else None)
         self.key = api.get("api_key", "")
 
     def run(self):
@@ -115,6 +137,7 @@ class PushWorker(threading.Thread):
         while True:
             try:
                 self._flush()
+                self._flush_presence()
             except Exception as e:
                 print(f"timeline push error: {e}", flush=True)
             time.sleep(self.poll)
@@ -137,6 +160,31 @@ class PushWorker(threading.Thread):
         self.store.mark_pushed(sent)
         if sent:
             print(f"pushed {len(sent)} timeline row(s) to POS", flush=True)
+
+    def _flush_presence(self):
+        if not self.presence_url:
+            return
+        rows = self.store.fetch_unpushed_presence(self.batch)
+        sent = []
+        for r in rows:
+            if self._post_presence(presence_payload(r)):
+                sent.append(r["id"])
+            else:
+                break  # POS unreachable -- retry the whole batch next cycle
+        self.store.mark_presence_pushed(sent)
+        if sent:
+            print(f"pushed {len(sent)} presence row(s) to POS", flush=True)
+
+    def _post_presence(self, payload):
+        data = _json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self.presence_url, data=data, method="POST",
+                                     headers={"content-type": "application/json",
+                                              "x-cctv-key": self.key})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     def _post(self, payload):
         data = _json.dumps(payload).encode("utf-8")
