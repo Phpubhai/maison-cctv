@@ -369,6 +369,9 @@ CONFIG = {
     "floor_diff_frac": 0.04,    # zone fraction changed vs clean ref = object
     "floor_obj_conf": 0.25,     # cup/glass/bottle detection threshold
     "floor_check_every": 5.0,   # seconds between checks
+    "floor_drift_secs": 10800.0,  # object stuck this long -> suspect a stale
+                                  # reference (moved cam / permanent fixture):
+                                  # warn once, then stop re-alerting that zone
 
     # --- tracking / timeline ---------------------------------------------
     "min_visible": 1.0,           # track must live this long before an

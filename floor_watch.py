@@ -46,6 +46,7 @@ class FloorWatch:
         self.where = spec.get("where", "the floor")
         self.secs = spec.get("secs", cfg["floor_secs"])
         self.diff_frac = spec.get("diff_frac", cfg["floor_diff_frac"])
+        self.drift_secs = spec.get("drift_secs", cfg.get("floor_drift_secs", 10800.0))
         self.ref = None
         ref_path = spec.get("ref")
         if ref_path:
@@ -58,6 +59,7 @@ class FloorWatch:
         self.model = _zoom(cfg["det_model"])  # shared stateless instance
         self.pending_since = None
         self.alerted = False
+        self.drift_flagged = False
         self.last_check = 0.0
         self.last_alert = float("-inf")
         print(f"floor watch on {camera_id}: zone {self.zone}, "
@@ -119,14 +121,28 @@ class FloorWatch:
         if found:
             self.pending_since = self.pending_since or now
             held = now - self.pending_since
+            # stale-reference guard: an object that never clears for this long is
+            # almost certainly a permanent fixture or a moved camera, not litter.
+            # Warn once, then stay quiet until the zone actually clears.
+            if held >= self.drift_secs:
+                if not self.drift_flagged:
+                    self.drift_flagged = True
+                    self.logger.log(self.camera_id, "STAFF", "REFERENCE DRIFT",
+                                    f"{self.where}: object stuck ~{int(held / 3600)}h "
+                                    f"since {_clock(self.pending_since)} -- likely a "
+                                    f"permanent fixture or moved camera; recapture "
+                                    f"the clean reference", "warning")
+                return
             if (held >= self.secs
                     and now - self.last_alert >= self.cfg["re_alert_secs"]):
+                first = not self.alerted
                 self.last_alert = now
                 self.alerted = True
                 what = ", ".join(sorted(set(found)))
-                img = self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
-                                                self.event, duration=held,
-                                                started=self.pending_since)
+                img = (self.logger.save_evidence(frame, box, self.camera_id, "STAFF",
+                                                 self.event, duration=held,
+                                                 started=self.pending_since)
+                       if first else None)
                 self.logger.log(self.camera_id, "STAFF", self.event,
                                 f"{what} on {self.where} since "
                                 f"{_clock(self.pending_since)} (room empty)",
@@ -136,4 +152,4 @@ class FloorWatch:
                 self.logger.log(self.camera_id, "STAFF", self.clear_event,
                                 f"{self.where} cleared, was there "
                                 f"~{int(now - self.pending_since)}s", "normal")
-            self.pending_since, self.alerted = None, False
+            self.pending_since, self.alerted, self.drift_flagged = None, False, False
