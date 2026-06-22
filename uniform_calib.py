@@ -25,7 +25,8 @@ from config import CONFIG
 SET_COLORS = [(0, 255, 0), (255, 80, 0), (255, 0, 255), (0, 255, 255)]  # BGR
 
 only = sys.argv[1] if len(sys.argv) > 1 else None
-for name, ch in CONFIG["cameras"]:
+for cam in CONFIG["cameras"]:
+    name, ch = cam["name"], cam["ch"]
     if only and name != only:
         continue
     cap = cv2.VideoCapture(CONFIG["nvr_url"].format(ch=ch), cv2.CAP_FFMPEG)
