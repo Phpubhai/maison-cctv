@@ -20,3 +20,8 @@ assert names == ["reception", "front door", "foot spa", "spa room"], names
 assert all(isinstance(u, str) and u.startswith("rtsp") for _, u in srcs)
 
 print("PASS: camera table + default_sources active/stream")
+
+from main import Grabber
+assert Grabber("rtsp://x").start_delay == 0.0
+assert Grabber("rtsp://x", 3.0).start_delay == 3.0
+print("PASS: Grabber start_delay")

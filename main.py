@@ -50,14 +50,18 @@ class Grabber(threading.Thread):
     """Reads one stream non-stop, keeping only the freshest frame (RTSP backs
     up and stalls if frames aren't consumed at stream speed)."""
 
-    def __init__(self, source):
+    def __init__(self, source, start_delay=0.0):
         super().__init__(daemon=True)
         self.source = source
+        self.start_delay = start_delay   # stagger first connect; this NVR stalls
+                                         # when hit by many simultaneous opens
         self.lock = threading.Lock()
         self.frame = None
         self.ts = 0.0
 
     def run(self):
+        if self.start_delay:
+            time.sleep(self.start_delay)
         while True:
             cap = cv2.VideoCapture(self.source)
             if not cap.isOpened():
@@ -149,7 +153,11 @@ def main(sources):
                                   enrollers.get(cid)) for cid in cam_ids}
     tidies = {cid: TidyMonitor(cid, CONFIG, logger) for cid in cam_ids}
     floors = {cid: FloorWatch(cid, CONFIG, logger) for cid in cam_ids}
-    grabbers = {cid: Grabber(src) for cid, src in cams}
+    # stagger first connects ~3s apart: this NVR stalls if hit by many
+    # simultaneous RTSP opens, so connecting one camera at a time loads them
+    # all reliably (vs all-at-once where most time out).
+    grabbers = {cid: Grabber(src, i * 3.0)
+                for i, (cid, src) in enumerate(cams)}
     for g in grabbers.values():
         g.start()
     if GPU:
