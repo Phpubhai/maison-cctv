@@ -408,6 +408,13 @@ CONFIG = {
     "timeline_events": 6,         # events shown in the on-screen strip
     "re_alert_secs": 300.0,       # repeat an ongoing alert at most this often
 
+    # --- presence engine (room×time intervals) ---------------------------
+    "presence_min_dwell": 12.0,    # must stay in a room/status this long before
+                                   # an interval opens (kills corridor flicker)
+    "threshold_timeout": 1800.0,   # inferred camera-less stay (e.g. ห้องน้ำ): if
+                                   # never reappears within this, mark "ไม่เห็น"
+                                   # (they likely left via another exit)
+
     # --- output -----------------------------------------------------------
     "events_path": "events.jsonl",
     "timeline_dir": "timelines",  # per-camera human-readable .txt timelines
