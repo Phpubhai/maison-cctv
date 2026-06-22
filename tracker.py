@@ -17,6 +17,7 @@ from collections import deque
 from person_labeler import RoleVoter, display_label, staff_name, staff_therapist_id
 from posture import (L_WRIST, R_WRIST, classify_posture, describe_causes,
                      face_hidden, imbalance_metrics, kpt)
+from rooms import which_room, which_threshold
 from sleep_analyzer import SleepAnalyzer
 
 
@@ -68,13 +69,17 @@ class _Tracked:
 
 
 class TrackManager:
-    def __init__(self, camera_id, cfg, logger, eyes, faces=None, enroller=None):
+    def __init__(self, camera_id, cfg, logger, eyes, faces=None, enroller=None,
+                 engine=None):
         self.camera_id = camera_id
         self.cfg = cfg
         self.logger = logger
         self.eyes = eyes
         self.faces = faces
         self.enroller = enroller
+        # shared presence engine (keyed by identity, one per process). None ->
+        # presence reporting is simply off (penalty pipeline unaffected).
+        self.engine = engine
         self.watch_only = camera_id in cfg.get("watch_only", [])
         self.presence = camera_id in cfg.get("presence_cameras", [])
         # no-penalty cameras: still track + label staff/customer (ENTER/LEAVE),
@@ -330,6 +335,21 @@ class TrackManager:
                 holders.add(best_tid)
         return holders
 
+    def _presence_observe(self, p, tid, box, frame_shape, customer_rooms, now):
+        """Report one staff person's room to the shared presence engine, keyed
+        by resolved identity (name, else anon "<camera>:<tid>")."""
+        if self.engine is None or not p.announced or p.voter.role != "staff":
+            return
+        room = which_room(self.camera_id, box, frame_shape, self.cfg)
+        door = which_threshold(self.camera_id, box, frame_shape, self.cfg)
+        name = p.voter.name
+        key = name or f"{self.camera_id}:{tid}"
+        has_cust = bool(customer_rooms.get(room))
+        self.engine.observe(now, key, self.camera_id, room, door, has_cust,
+                            therapist=name,
+                            therapist_id=staff_therapist_id(name),
+                            confidence=1.0 if name else 0.0)
+
     def _update_presence(self, now, frame, detections):
         """Staff-only room: log everyone as STAFF on enter/leave (by name once
         their face is recognized), no penalty analysis. Faces are also
@@ -409,6 +429,14 @@ class TrackManager:
             rows.append((tid, box, p, pose))
         holders = self._phone_holders(phones, rows, frame.shape)
 
+        # which logical rooms currently hold a customer (drives "ทำงาน" status)
+        customer_rooms = {}
+        for tid_c, box_c, p_c, _ in rows:
+            if p_c.voter.role == "customer":
+                rc = which_room(self.camera_id, box_c, frame.shape, self.cfg)
+                if rc:
+                    customer_rooms[rc] = True
+
         for tid, box, p, pose in rows:
             # fixed staff position (reception desk seat) or rest zone (break
             # room): force staff regardless of uniform/face. 'staff' is
@@ -475,6 +503,9 @@ class TrackManager:
                                     therapist_id=staff_therapist_id(p.voter.name),
                                     room=room)
                     p.room = room
+
+            # presence layer: feed the shared engine (room intervals + status)
+            self._presence_observe(p, tid, box, frame.shape, customer_rooms, now)
 
             # --- display strings ------------------------------------------
             label = display_label(p.voter.role, p.voter.name)

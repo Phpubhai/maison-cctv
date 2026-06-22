@@ -29,6 +29,7 @@ from floor_watch import FloorWatch
 from overlay import compose, draw_people, draw_phones
 from person_labeler import FaceMatcher
 from pos_timeline import PushWorker, start_image_server
+from presence_engine import PresenceEngine
 from room_tidy import TidyMonitor
 from sleep_analyzer import EyeScorer, PoseEstimator
 from timeline_logger import TimelineLogger
@@ -141,6 +142,8 @@ def main(sources):
     if logger.store is not None:
         image_base = start_image_server(CONFIG)
         PushWorker(logger.store, CONFIG, image_base).start()
+    # presence engine: ONE shared instance, keyed by identity across cameras
+    engine = PresenceEngine(logger.store, CONFIG) if logger.store is not None else None
     pose = PoseEstimator(CONFIG)   # stateless -> shared
     eyes = EyeScorer(CONFIG)       # stateless -> shared
     faces = FaceMatcher(CONFIG)    # enrolled staff faces -> shared
@@ -150,7 +153,7 @@ def main(sources):
     enrollers = {cid: AutoEnroller(CONFIG, faces, logger, cid)
                  for cid in cam_ids if cid in CONFIG.get("presence_cameras", [])}
     trackers = {cid: TrackManager(cid, CONFIG, logger, eyes, faces,
-                                  enrollers.get(cid)) for cid in cam_ids}
+                                  enrollers.get(cid), engine) for cid in cam_ids}
     tidies = {cid: TidyMonitor(cid, CONFIG, logger) for cid in cam_ids}
     floors = {cid: FloorWatch(cid, CONFIG, logger) for cid in cam_ids}
     # stagger first connects ~3s apart: this NVR stalls if hit by many
@@ -217,6 +220,8 @@ def main(sources):
                 poses = (pose.estimate(frame) if detections
                          and not tm.watch_only and not tm.presence else [])
                 people = trackers[cid].update(now, frame, detections, poses, phones)
+                if engine is not None:
+                    engine.tick(now)
                 tidies[cid].update(now, frame, len(detections))
                 floors[cid].update(now, frame, len(detections))
                 draw_people(frame, people)
