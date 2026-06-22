@@ -124,6 +124,33 @@ CONFIG = {
         ],
     },
 
+    # logical rooms (rooms != cameras). The presence layer keys off this:
+    # name -> {type, via, camera, zone?/door?, anchor?}. via "camera"=whole
+    # frame, "zone"=region in the frame, "threshold"=camera-less room reached
+    # through a doorway on `camera`. CALIBRATE zone/door rects per real layout
+    # (see docs/superpowers/specs/2026-06-22-presence-timeline-design.md §12).
+    "rooms": {
+        "Reception":  {"type": "front",   "via": "camera", "camera": "reception"},
+        "Front Desk": {"type": "front",   "via": "camera", "camera": "front door"},
+        "Foot Spa":   {"type": "service", "via": "camera", "camera": "foot spa"},
+        "ห้องพัก":     {"type": "rest",    "via": "camera", "camera": "office",
+                       "anchor": True},
+        "MAISON 1":   {"type": "service", "via": "zone", "camera": "spa room",
+                       "zone": (0.63, 0.06, 0.82, 0.90)},
+        "MAISON 2":   {"type": "service", "via": "zone", "camera": "spa room",
+                       "zone": (0.56, 0.06, 0.63, 0.62)},
+        "MAISON 3":   {"type": "service", "via": "zone", "camera": "spa room",
+                       "zone": (0.23, 0.01, 0.36, 0.94)},
+        "MAISON 4":   {"type": "service", "via": "zone", "camera": "spa room",
+                       "zone": (0.36, 0.01, 0.41, 0.73)},
+        # camera-less rooms: uncomment + calibrate "door" on the camera that
+        # SEES the doorway (the person then disappears -> inferred inside):
+        # "ห้องน้ำ":   {"type": "facility", "via": "threshold",
+        #             "camera": "<cam that sees the door>", "door": (0.0,0.0,0.1,0.1)},
+        # "ห้องซักผ้า": {"type": "back", "via": "threshold",
+        #             "camera": "<cam>", "door": (0.0,0.0,0.1,0.1)},
+    },
+
     # no-phone cameras: keep other penalties (sleep, floor objects) but never
     # raise PHONE USE. foot spa: staff hold tools/oil bottles all shift, so
     # phone detection there is almost all false positives.
