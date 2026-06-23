@@ -33,6 +33,7 @@ from presence_engine import PresenceEngine
 from identity_resolver import IdentityResolver
 from booking_sync import RosterSync, make_bookings_fetch
 from corrections_sync import CorrectionsSync, make_corrections_fetch
+from face_teach import AnchorCapture, anchor_camera
 from room_tidy import TidyMonitor
 from sleep_analyzer import EyeScorer, PoseEstimator
 from timeline_logger import TimelineLogger
@@ -162,6 +163,9 @@ def main(sources):
     trackers = {cid: TrackManager(cid, CONFIG, logger, eyes, faces,
                                   enrollers.get(cid), engine, resolver)
                 for cid in cam_ids}
+    # supervised face capture on the anchor (staff-room) camera only
+    anchor_cap = {cid: AnchorCapture(CONFIG, cid) for cid in cam_ids
+                  if cid == anchor_camera(CONFIG)}
     tidies = {cid: TidyMonitor(cid, CONFIG, logger) for cid in cam_ids}
     floors = {cid: FloorWatch(cid, CONFIG, logger) for cid in cam_ids}
     # stagger first connects ~3s apart: this NVR stalls if hit by many
@@ -222,6 +226,9 @@ def main(sources):
                 views[cid] = offline_tile(cid, CONFIG["tile_w"])
             else:
                 detections, phones = detectors[cid].detect(frame)
+                if cid in anchor_cap:
+                    anchor_cap[cid].feed(now, frame,
+                                         [(d["track_id"], d["box"]) for d in detections])
                 # watch-only and presence cameras never use keypoints --
                 # skip the (heavy) pose model entirely for them
                 tm = trackers[cid]
