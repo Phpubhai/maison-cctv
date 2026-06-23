@@ -415,6 +415,25 @@ CONFIG = {
                                    # never reappears within this, mark "ไม่เห็น"
                                    # (they likely left via another exit)
 
+    # --- identity resolver (Plan 2) --------------------------------------
+    "id_face_conf": 0.9,       # confidence assigned on a face match
+    "id_conf_decay": 0.02,     # confidence lost per second a face is NOT re-seen
+    "id_min_conf": 0.3,        # below this, a name is dropped -> anonymous
+    # reception name corrections pulled from the POS (write side = Plan 3).
+    "corrections": {"enabled": False},
+    "corrections_poll_secs": 5,
+    # today's roster from bookings -> a face name not on shift is ignored.
+    # NOTE: cctvBookings has therapistName but no room, so this narrows WHO is
+    # on shift, not WHICH room (see contracts/cctv-api.v1.md).
+    "roster": {"enabled": False},
+    "roster_poll_secs": 300,
+    # supervised face teaching at the anchor (staff-room) camera. The anchor
+    # camera is the room flagged anchor:True in CONFIG["rooms"].
+    "face_teach": {"enabled": False,
+                   "queue_dir": os.path.join(_HERE, "face_queue"),
+                   "capture_every": 1.5,   # seconds between captures per track
+                   "samples_cap": 30},     # max embeddings kept per person
+
     # --- output -----------------------------------------------------------
     "events_path": "events.jsonl",
     "timeline_dir": "timelines",  # per-camera human-readable .txt timelines
