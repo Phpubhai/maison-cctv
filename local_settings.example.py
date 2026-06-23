@@ -7,5 +7,11 @@
 NVR_URL = "rtsp://USER:PASSWORD@192.168.1.70:554/user=USER&password=PASSWORD&channel={ch}"
 
 # Shared secret for the POS Cloud Functions (header x-cctv-key). Get it from
-# the POS team. Leave "" until the integration is wired up.
+# the POS team. Leave "" until the integration is wired up. Must MATCH the
+# CCTV_API_KEY secret set on the POS side.
 POS_API_KEY = ""
+
+# Base URL of the POS Cloud Functions (where /cctvPresence, /cctvBookings,
+# /cctvCorrections live). Get it from the POS team after deploy; leave "" until
+# then. Form: https://asia-southeast1-<FIREBASE_PROJECT>.cloudfunctions.net
+POS_API_BASE = ""

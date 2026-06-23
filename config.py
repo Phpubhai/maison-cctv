@@ -20,6 +20,14 @@ except ImportError:
         "NVR_URL", "rtsp://USER:PASSWORD@HOST:554/user=USER&password=PASSWORD&channel={ch}")
     POS_API_KEY = os.environ.get("POS_API_KEY", "")
 
+# POS Cloud Functions base URL (where /cctvPresence, /cctvBookings,
+# /cctvCorrections live). Separate try so an older local_settings.py WITHOUT it
+# still loads NVR_URL/POS_API_KEY above (instead of falling back wholesale).
+try:
+    from local_settings import POS_API_BASE
+except ImportError:
+    POS_API_BASE = os.environ.get("POS_API_BASE", "")
+
 # Realtime push to the event server (yolo-server). Reads the SAME env vars the
 # launcher (cctv-env.bat) exports, so the monitor and the standalone client
 # share one key. Auto-disabled when not set -> no behavior change.
@@ -452,6 +460,13 @@ CONFIG = {
     # local LAN-only image server so the POS "view image" link resolves
     # in-shop (images NEVER go to cloud). 0.0.0.0 = reachable on the LAN.
     "image_server": {"host": "0.0.0.0", "port": 8088, "enabled": True},
+
+    # POS Cloud Functions endpoint -- shared by presence/timeline PUSH and the
+    # roster + corrections SYNC (booking_sync / corrections_sync read this too).
+    # Empty base_url => every POS push/pull is a no-op, so the repo stays safe by
+    # default until local_settings.py is filled in. api_key = the x-cctv-key
+    # header value, which must MATCH the CCTV_API_KEY secret on the POS side.
+    "pos_api": {"base_url": POS_API_BASE, "api_key": POS_API_KEY},
 
     # push the penalty+customer subset to the POS Cloud Function (Firestore).
     # base_url/api_key come from local_settings.py (POS_API_KEY) when ready.
