@@ -70,7 +70,7 @@ class _Tracked:
 
 class TrackManager:
     def __init__(self, camera_id, cfg, logger, eyes, faces=None, enroller=None,
-                 engine=None):
+                 engine=None, resolver=None):
         self.camera_id = camera_id
         self.cfg = cfg
         self.logger = logger
@@ -80,6 +80,8 @@ class TrackManager:
         # shared presence engine (keyed by identity, one per process). None ->
         # presence reporting is simply off (penalty pipeline unaffected).
         self.engine = engine
+        # identity resolver (Plan 2): None -> fall back to raw face id (Plan 1)
+        self.resolver = resolver
         self.watch_only = camera_id in cfg.get("watch_only", [])
         self.presence = camera_id in cfg.get("presence_cameras", [])
         # no-penalty cameras: still track + label staff/customer (ENTER/LEAVE),
@@ -337,18 +339,25 @@ class TrackManager:
 
     def _presence_observe(self, p, tid, box, frame_shape, customer_rooms, now):
         """Report one staff person's room to the shared presence engine, keyed
-        by resolved identity (name, else anon "<camera>:<tid>")."""
+        by resolved identity. With a resolver: name/key/confidence come from it
+        (correction > face > sticky > anon). Without one: Plan 1 fallback."""
         if self.engine is None or not p.announced or p.voter.role != "staff":
             return
         room = which_room(self.camera_id, box, frame_shape, self.cfg)
         door = which_threshold(self.camera_id, box, frame_shape, self.cfg)
-        name = p.voter.name
-        key = name or f"{self.camera_id}:{tid}"
         has_cust = bool(customer_rooms.get(room))
+        if self.resolver is not None:
+            res = self.resolver.resolve(now, f"{self.camera_id}:{tid}",
+                                        face_id=p.voter.name)
+            key, name = res["key"], res["name"]
+            tid_pos, conf = res["therapist_id"], res["confidence"]
+        else:
+            name = p.voter.name
+            key = name or f"{self.camera_id}:{tid}"
+            tid_pos = staff_therapist_id(name)
+            conf = 1.0 if name else 0.0
         self.engine.observe(now, key, self.camera_id, room, door, has_cust,
-                            therapist=name,
-                            therapist_id=staff_therapist_id(name),
-                            confidence=1.0 if name else 0.0)
+                            therapist=name, therapist_id=tid_pos, confidence=conf)
 
     def _update_presence(self, now, frame, detections):
         """Staff-only room: log everyone as STAFF on enter/leave (by name once
@@ -564,4 +573,6 @@ class TrackManager:
                                     "LEAVE", "person leaves frame", "normal",
                                     therapist_id=p_tid)
                 del self.people[tid]
+                if self.resolver is not None:
+                    self.resolver.depart(f"{self.camera_id}:{tid}")
         return out

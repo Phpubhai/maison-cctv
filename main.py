@@ -30,6 +30,9 @@ from overlay import compose, draw_people, draw_phones
 from person_labeler import FaceMatcher
 from pos_timeline import PushWorker, start_image_server
 from presence_engine import PresenceEngine
+from identity_resolver import IdentityResolver
+from booking_sync import RosterSync, make_bookings_fetch
+from corrections_sync import CorrectionsSync, make_corrections_fetch
 from room_tidy import TidyMonitor
 from sleep_analyzer import EyeScorer, PoseEstimator
 from timeline_logger import TimelineLogger
@@ -144,6 +147,10 @@ def main(sources):
         PushWorker(logger.store, CONFIG, image_base).start()
     # presence engine: ONE shared instance, keyed by identity across cameras
     engine = PresenceEngine(logger.store, CONFIG) if logger.store is not None else None
+    # identity resolver (Plan 2) + its two POS-fed syncers
+    resolver = IdentityResolver(CONFIG)
+    RosterSync(resolver, make_bookings_fetch(CONFIG), CONFIG).start()
+    CorrectionsSync(resolver, make_corrections_fetch(CONFIG), CONFIG).start()
     pose = PoseEstimator(CONFIG)   # stateless -> shared
     eyes = EyeScorer(CONFIG)       # stateless -> shared
     faces = FaceMatcher(CONFIG)    # enrolled staff faces -> shared
@@ -153,7 +160,8 @@ def main(sources):
     enrollers = {cid: AutoEnroller(CONFIG, faces, logger, cid)
                  for cid in cam_ids if cid in CONFIG.get("presence_cameras", [])}
     trackers = {cid: TrackManager(cid, CONFIG, logger, eyes, faces,
-                                  enrollers.get(cid), engine) for cid in cam_ids}
+                                  enrollers.get(cid), engine, resolver)
+                for cid in cam_ids}
     tidies = {cid: TidyMonitor(cid, CONFIG, logger) for cid in cam_ids}
     floors = {cid: FloorWatch(cid, CONFIG, logger) for cid in cam_ids}
     # stagger first connects ~3s apart: this NVR stalls if hit by many
